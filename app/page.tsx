@@ -179,7 +179,7 @@ export default function Home() {
         zoom: 1.65,
         minZoom: 1,
         maxZoom: 19,
-        attributionControl: true,
+        attributionControl: {},
         style: {
           version: 8,
           sources: {
