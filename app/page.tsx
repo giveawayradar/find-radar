@@ -220,29 +220,26 @@ export default function Home() {
         style: {
           version: 8,
           sources: {
-            carto: {
+            osm: {
               type: "raster",
-              tiles: [
-                "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-                "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-                "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-              ],
-              tileSize: 512,
-              attribution: "© OpenStreetMap contributors © CARTO",
+              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tileSize: 256,
+              maxzoom: 19,
+              attribution: "© OpenStreetMap contributors",
             },
           },
           layers: [
             {
-              id: "carto-dark",
+              id: "osm-dark",
               type: "raster",
-              source: "carto",
+              source: "osm",
               minzoom: 0,
-              maxzoom: 20,
+              maxzoom: 19,
               paint: {
-                "raster-saturation": -0.2,
-                "raster-contrast": 0.18,
-                "raster-brightness-min": 0.015,
-                "raster-brightness-max": 0.72,
+                "raster-saturation": -0.9,
+                "raster-contrast": 0.38,
+                "raster-brightness-min": 0.01,
+                "raster-brightness-max": 0.28,
               },
             },
           ],
