@@ -1,0 +1,17 @@
+FIND RADAR - FIXED PROJECT
+
+What was fixed:
+- Removed the build-time import of maplibre-gl/dist/maplibre-gl.css that Vercel was failing to resolve.
+- MapLibre's stylesheet is now loaded from the official unpkg CDN in app/layout.tsx.
+- Kept maplibre-gl as an npm dependency for the actual interactive map code.
+- Removed the old duplicate app/lost-found/page.tsx route; Lost & Found is handled by app/page.tsx.
+- Updated metadata to Find Radar.
+
+After replacing your project files:
+1. npm install
+2. npm run build
+3. git add .
+4. git commit -m "Fix Find Radar world map build"
+5. git push
+
+The base map uses OpenStreetMap raster tiles, so it supports world view and street/road detail when zoomed in.

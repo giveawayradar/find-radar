@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { Map as MapLibreMap, Marker } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 
 type Mode = "lost" | "products" | "restock";
 type Screen = "home" | "lost-found";
