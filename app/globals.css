@@ -1,744 +1,1511 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #040706;
+}
+
+body {
+  color: #f2f6f4;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
 /* =========================================================
-   LOST & FOUND
+   FIND RADAR HOME
 ========================================================= */
 
-.lfPage {
+.findHome {
+  position: relative;
   min-height: 100vh;
-  background: #050706;
-  color: #f3f7f5;
-  padding: 14px;
+  overflow: hidden;
+  padding: 20px 12px 10px;
+  display: flex;
+  flex-direction: column;
+
+  background:
+    radial-gradient(
+      circle at 50% 4%,
+      rgba(50, 230, 164, 0.12),
+      transparent 28%
+    ),
+    linear-gradient(
+      180deg,
+      #07100c 0%,
+      #030504 100%
+    );
+}
+
+.backgroundGrid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.08;
+  pointer-events: none;
+
+  background-image:
+    linear-gradient(
+      rgba(255,255,255,.03) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255,255,255,.03) 1px,
+      transparent 1px
+    );
+
+  background-size: 40px 40px;
+}
+
+.ambientGlow {
+  position: absolute;
+  top: -200px;
+  left: 50%;
+  width: 750px;
+  height: 420px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(48, 229, 163, .11);
+  filter: blur(120px);
+}
+
+.findHero {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding-bottom: 24px;
+}
+
+.heroRadar {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 8px;
+  border: 1px solid #21483a;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.heroRadar span {
+  position: absolute;
+  border: 1px solid rgba(73, 231, 174, .25);
+  border-radius: 50%;
+}
+
+.heroRadar span:nth-child(1) {
+  width: 24px;
+  height: 24px;
+}
+
+.heroRadar span:nth-child(2) {
+  width: 12px;
+  height: 12px;
+}
+
+.heroRadar i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #49e7ad;
+  box-shadow: 0 0 12px #49e7ad;
+}
+
+.heroEyebrow {
+  color: #49dda8;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .34em;
+}
+
+.findHero h1 {
+  margin: 7px 0 0;
+  font-size: clamp(42px, 4.7vw, 70px);
+  line-height: .95;
+  font-weight: 900;
+  letter-spacing: -.065em;
+}
+
+.findHero h1 b {
+  color: #48e2aa;
+}
+
+.findHero p {
+  margin: 10px 0 0;
+  color: #65726c;
+  font-size: 10px;
+}
+
+.modeGrid {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 570px;
+  display: flex;
+  gap: 12px;
+}
+
+.modeCard {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid #243029;
+  border-radius: 21px;
+  background: rgba(5, 10, 8, .94);
+  text-align: left;
+  cursor: pointer;
+
+  transition:
+    flex .35s cubic-bezier(.2,.8,.2,1),
+    transform .35s cubic-bezier(.2,.8,.2,1),
+    opacity .25s ease,
+    border .18s ease,
+    background .25s ease,
+    box-shadow .25s ease;
+}
+
+.modeCard:hover {
+  transform: translateY(-4px);
+  border-color: #40554c;
+  background: #09110d;
+}
+
+.modeCard.selected {
+  flex: 1.12 1 0;
+  transform: translateY(-6px);
+  border: 3px solid #48e2aa;
+  background:
+    radial-gradient(
+      circle at 50% 35%,
+      rgba(72, 226, 170, .09),
+      transparent 42%
+    ),
+    #07100c;
+
+  box-shadow:
+    0 0 50px rgba(72,226,170,.09),
+    0 20px 60px rgba(0,0,0,.25);
+}
+
+.modeCard.dimmed {
+  flex: .94 1 0;
+  opacity: .55;
+}
+
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  color: #59665f;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .18em;
+}
+
+.lostPreview,
+.productPreview,
+.restockPreview {
+  position: relative;
+  height: 46%;
+  min-height: 260px;
+  margin-top: 8px;
+  border-bottom: 1px solid #1c2521;
   overflow: hidden;
 }
 
-.lfTopbar {
-  height: 64px;
+.previewRoad {
+  position: absolute;
+  height: 1px;
+  background: #1a2a23;
+}
+
+.road1 {
+  width: 130%;
+  top: 42%;
+  left: -15%;
+  transform: rotate(-14deg);
+}
+
+.road2 {
+  width: 130%;
+  top: 65%;
+  left: -10%;
+  transform: rotate(18deg);
+}
+
+.road3 {
+  width: 90%;
+  top: 42%;
+  left: 45%;
+  transform: rotate(67deg);
+}
+
+.previewRing {
+  position: absolute;
+  left: 40%;
+  top: 50%;
+  transform: translate(-50%,-50%);
+  border: 1px solid rgba(69,226,168,.14);
+  border-radius: 50%;
+}
+
+.previewRing.big {
+  width: 180px;
+  height: 180px;
+}
+
+.previewRing.small {
+  width: 105px;
+  height: 105px;
+}
+
+.previewPin {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.previewPin i {
+  width: 13px;
+  height: 13px;
+  border: 3px solid #06100b;
+  border-radius: 50%;
+  background: #49e7ad;
+  box-shadow: 0 0 15px rgba(73,231,173,.7);
+}
+
+.previewPin small {
+  color: #6a8177;
+  font-size: 5px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.previewPin.lost {
+  left: 36%;
+  top: 45%;
+}
+
+.previewPin.found {
+  left: 63%;
+  top: 29%;
+}
+
+.previewMatchLine {
+  position: absolute;
+  width: 28%;
+  height: 1px;
+  left: 39%;
+  top: 40%;
+  transform: rotate(-23deg);
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #2ea77c 0 5px,
+      transparent 5px 10px
+    );
+}
+
+.previewMatch {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  border: 1px solid #274036;
+  border-radius: 999px;
+  background: #07100c;
+  color: #72a18f;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.productPreview {
+  display: grid;
+  place-items: center;
+}
+
+.productCircle {
+  position: absolute;
+  border: 1px solid rgba(72,226,170,.13);
+  border-radius: 50%;
+}
+
+.productCircle.outer {
+  width: 210px;
+  height: 210px;
+}
+
+.productCircle.inner {
+  width: 125px;
+  height: 125px;
+}
+
+.productSweep {
+  position: absolute;
+  width: 105px;
+  height: 105px;
+  left: 50%;
+  top: 50%;
+  transform-origin: left top;
+  background:
+    linear-gradient(
+      25deg,
+      rgba(72,226,170,.15),
+      transparent 60%
+    );
+  clip-path: polygon(0 0,100% 0,0 100%);
+  animation: radarSweep 5s linear infinite;
+}
+
+.productTarget {
+  position: relative;
+  z-index: 2;
+  width: 75px;
+  height: 75px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #315143;
+  border-radius: 17px;
+  background: #09140f;
+  color: #49e6ad;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.specChip,
+.matchChip {
+  position: absolute;
+  padding: 7px 9px;
+  border: 1px solid #27352e;
+  border-radius: 8px;
+  background: #07100c;
+  color: #68756f;
+  font-size: 6px;
+  font-weight: 800;
+}
+
+.specChip b {
+  display: block;
+  margin-top: 3px;
+  color: #c7d0cc;
+  font-size: 8px;
+}
+
+.specChip.size {
+  left: 12%;
+  top: 28%;
+}
+
+.specChip.budget {
+  right: 10%;
+  top: 54%;
+}
+
+.matchChip {
+  right: 18%;
+  top: 18%;
+  color: #4ee0aa;
+}
+
+.restockPreview {
+  display: grid;
+  place-items: center;
+}
+
+.restockRing {
+  position: absolute;
+  border: 1px solid rgba(72,226,170,.08);
+  border-radius: 50%;
+}
+
+.ringA {
+  width: 220px;
+  height: 220px;
+}
+
+.ringB {
+  width: 145px;
+  height: 145px;
+}
+
+.watchProduct {
+  position: relative;
+  z-index: 2;
+  width: 110px;
+  height: 110px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #345345;
+  border-radius: 50%;
+  background: #09130f;
+}
+
+.watchProduct small {
+  color: #53615a;
+  font-size: 5px;
+  letter-spacing: .14em;
+}
+
+.watchProduct strong {
+  margin-top: 5px;
+  font-size: 18px;
+}
+
+.watchProduct b {
+  margin-top: 5px;
+  color: #48dfa9;
+  font-size: 7px;
+}
+
+.stockNode {
+  position: absolute;
+  color: #56615c;
+  font-size: 6px;
+  font-weight: 900;
+}
+
+.stockNode.active {
+  color: #4ee4ad;
+}
+
+.n1 { left: 12%; top: 28%; }
+.n2 { right: 11%; top: 27%; }
+.n3 { right: 11%; bottom: 22%; }
+.n4 { left: 11%; bottom: 21%; }
+
+.modeContent {
+  margin-top: auto;
+  padding: 15px 2px 18px;
+}
+
+.modeIcon {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #27372f;
+  border-radius: 9px;
+  color: #49e1aa;
+  background: #08110d;
+}
+
+.modeContent h2 {
+  margin: 0;
+  font-size: clamp(25px,2.25vw,39px);
+  letter-spacing: -.055em;
+}
+
+.modeContent p {
+  max-width: 350px;
+  margin: 9px 0 0;
+  color: #69766f;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.modeFooter {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid #202923;
+  color: #65726c;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .13em;
+}
+
+.modeFooter strong {
+  font-size: 15px;
+}
+
+.modeCard.selected .modeFooter {
+  color: #49e2aa;
+}
+
+.findFooter {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 3px 0;
+  color: #3e4944;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .16em;
+}
+
+.systemOnline {
+  color: #4bc89b;
+}
+
+/* =========================================================
+   LOST & FOUND APPLICATION
+========================================================= */
+
+.lostFoundApp {
+  height: 100vh;
+  overflow: hidden;
+  padding: 12px;
+  background:
+    radial-gradient(
+      circle at 70% 30%,
+      rgba(42,180,125,.07),
+      transparent 35%
+    ),
+    #030605;
+}
+
+.appTopbar {
+  height: 62px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 20px;
-  padding: 8px 12px;
-  border: 1px solid #202925;
-  border-radius: 17px;
-  background: rgba(7, 11, 9, .94);
+  gap: 14px;
+  padding: 7px 11px;
+  border: 1px solid #202c26;
+  border-radius: 16px;
+  background: rgba(5,10,8,.96);
 }
 
-.lfBrand {
+.appBrand {
   border: 0;
-  background: transparent;
-  color: white;
+  background: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   text-align: left;
   cursor: pointer;
 }
 
-.lfBrandMark {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+.brandRadar {
+  width: 35px;
+  height: 35px;
   display: grid;
   place-items: center;
-  background: #48e7ac;
+  border-radius: 50%;
+  background: #4ae4ad;
   color: #04100b;
+  font-size: 13px;
   font-weight: 900;
 }
 
-.lfBrand strong,
-.lfBrand small {
+.appBrand strong,
+.appBrand small {
   display: block;
 }
 
-.lfBrand strong {
-  font-size: 13px;
+.appBrand strong {
+  font-size: 12px;
 }
 
-.lfBrand small {
-  margin-top: 2px;
-  color: #68756f;
+.appBrand small {
+  margin-top: 3px;
+  color: #66736d;
+  font-size: 7px;
+}
+
+.appTabs {
+  display: flex;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid #202b25;
+  border-radius: 12px;
+  background: #070c09;
+}
+
+.appTabs button {
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: transparent;
+  color: #627069;
   font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
-.lfTabs {
+.appTabs button.active {
+  background: #0d1c15;
+  color: #50e1ab;
+  box-shadow: inset 0 0 0 1px #284d3c;
+}
+
+.mapControlsTop {
+  justify-self: end;
   display: flex;
   gap: 6px;
-  padding: 4px;
-  border: 1px solid #202824;
-  border-radius: 13px;
-  background: #090d0b;
 }
 
-.lfTabs button {
-  border: 0;
-  border-radius: 9px;
-  padding: 10px 16px;
-  background: transparent;
-  color: #65716c;
-  font-size: 9px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.lfTabs button.active {
-  background: #102019;
-  color: #56e6b0;
-  box-shadow: inset 0 0 0 1px #244a3a;
-}
-
-.locationButton {
-  justify-self: end;
-  border: 1px solid #26342e;
+.mapControlsTop button {
+  padding: 9px 12px;
+  border: 1px solid #29372f;
   border-radius: 999px;
-  background: #0b120f;
-  color: #75e9bd;
-  padding: 10px 14px;
-  font-size: 9px;
+  background: #08100c;
+  color: #84918b;
+  font-size: 8px;
   font-weight: 800;
   cursor: pointer;
 }
 
-.lfWorkspace {
-  height: calc(100vh - 92px);
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: 390px minmax(0, 1fr);
-  gap: 12px;
+.mapControlsTop .locationControl {
+  color: #51dfaa;
+  border-color: #315643;
 }
 
-.lfSidebar {
+.lostWorkspace {
+  height: calc(100vh - 86px);
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 370px minmax(0,1fr);
+  gap: 10px;
+}
+
+.lostSidebar {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  border: 1px solid #202925;
-  border-radius: 21px;
-  background: #080b0a;
+  padding: 18px;
+  border: 1px solid #202b25;
+  border-radius: 19px;
+  background: #060a08;
 }
 
-.lfHeading {
+.sidebarTitle {
   display: flex;
   justify-content: space-between;
-  gap: 15px;
+  gap: 12px;
 }
 
-.miniEyebrow {
-  color: #48dfa9;
-  font-size: 8px;
+.sidebarTitle > div > span {
+  color: #4ddca8;
+  font-size: 7px;
   font-weight: 900;
-  letter-spacing: .19em;
+  letter-spacing: .17em;
 }
 
-.lfHeading h1 {
-  margin: 7px 0 0;
-  font-size: 32px;
+.sidebarTitle h1 {
+  margin: 6px 0 0;
+  font-size: 30px;
   letter-spacing: -.055em;
 }
 
-.onlineBadge {
+.sidebarTitle b {
   height: fit-content;
-  display: flex;
-  align-items: center;
-  gap: 5px;
   padding: 6px 8px;
-  border: 1px solid #224437;
+  border: 1px solid #234536;
   border-radius: 999px;
-  color: #54ddaa;
-  font-size: 7px;
-  font-weight: 900;
+  color: #49dca6;
+  font-size: 6px;
 }
 
-.onlineBadge i,
-.matchTitle i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #48e7ac;
-  box-shadow: 0 0 10px #48e7ac;
-}
-
-.lfIntro {
-  margin: 8px 0 18px;
-  color: #65716c;
-  font-size: 10px;
+.sidebarIntro {
+  margin: 8px 0 16px;
+  color: #65726b;
+  font-size: 9px;
   line-height: 1.5;
 }
 
-.reportActions {
+.reportButtons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 7px;
 }
 
-.reportActions button {
-  height: 48px;
-  border-radius: 12px;
-  font-size: 9px;
+.reportButtons button {
+  height: 46px;
+  border-radius: 11px;
+  font-size: 8px;
   font-weight: 900;
   cursor: pointer;
 }
 
-.primaryReport {
-  border: 1px solid #44dba4;
-  background: #48e7ac;
-  color: #04100b;
-}
-
-.secondaryReport {
-  border: 1px solid #2a3a33;
-  background: #0d1310;
-  color: #a9b5b0;
-}
-
-.reportActions span {
+.reportButtons strong {
   margin-right: 5px;
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.lfSearch {
-  height: 44px;
-  margin-top: 13px;
+.lostButton {
+  border: 1px solid #47dfa8;
+  background: #48e1aa;
+  color: #04110b;
+}
+
+.foundButton {
+  border: 1px solid #2d3c35;
+  background: #0a110e;
+  color: #a6b2ac;
+}
+
+.reportSearch {
+  height: 42px;
+  margin-top: 11px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 12px;
-  border: 1px solid #26302c;
-  border-radius: 11px;
-  background: #050807;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid #25322c;
+  border-radius: 10px;
+  background: #030605;
 }
 
-.lfSearch span {
-  color: #47dda7;
+.reportSearch span {
+  color: #4ee0aa;
 }
 
-.lfSearch input {
+.reportSearch input {
   flex: 1;
   min-width: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: white;
-  font-size: 10px;
+  font-size: 9px;
 }
 
-.filterRow {
+.reportFilters {
   display: flex;
-  gap: 6px;
-  margin-top: 9px;
+  gap: 5px;
+  margin-top: 8px;
 }
 
-.filterRow button {
-  border: 1px solid #222c27;
+.reportFilters button {
+  padding: 6px 10px;
+  border: 1px solid #202c26;
   border-radius: 999px;
-  background: #0a0f0d;
-  color: #65716c;
-  padding: 7px 11px;
-  font-size: 8px;
+  background: #080d0a;
+  color: #617069;
+  font-size: 7px;
   font-weight: 800;
   cursor: pointer;
 }
 
-.filterRow button.active {
-  color: #53e2ac;
-  border-color: #2e5b48;
-  background: #0c1914;
+.reportFilters button.active {
+  border-color: #2b5743;
+  background: #0a1812;
+  color: #50dfa9;
 }
 
-.resultsHeader {
-  margin-top: 20px;
-  padding-bottom: 9px;
+.resultsLabel {
+  margin-top: 17px;
+  padding-bottom: 8px;
   display: flex;
   justify-content: space-between;
-  border-bottom: 1px solid #1c2421;
-  color: #53605a;
-  font-size: 7px;
+  border-bottom: 1px solid #19221e;
+  color: #52605a;
+  font-size: 6px;
   font-weight: 900;
   letter-spacing: .16em;
 }
 
-.resultsHeader strong {
-  color: #56e4ae;
+.resultsLabel b {
+  color: #4edfaa;
 }
 
-.reportList {
+.reportFeed {
   min-height: 0;
   overflow-y: auto;
-  margin-top: 8px;
-  padding-right: 3px;
+  margin-top: 7px;
+  padding-right: 2px;
 }
 
-.reportCard {
+.reportItem {
   width: 100%;
-  margin-bottom: 7px;
+  margin-bottom: 6px;
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 10px;
-  align-items: start;
-  border: 1px solid #1e2723;
-  border-radius: 12px;
-  padding: 12px;
-  background: #090d0b;
-  color: white;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #1f2924;
+  border-radius: 11px;
+  background: #080c0a;
   text-align: left;
   cursor: pointer;
 }
 
-.reportCard:hover,
-.reportCard.selected {
-  border-color: #315342;
-  background: #0c1511;
+.reportItem:hover,
+.reportItem.selected {
+  border-color: #315744;
+  background: #0a1510;
 }
 
-.reportType {
+.reportStatus {
   width: fit-content;
+  padding: 4px 6px;
   border-radius: 999px;
-  padding: 5px 7px;
-  font-size: 6px;
+  font-size: 5px;
   font-weight: 900;
   letter-spacing: .12em;
 }
 
-.reportType.lost {
-  border: 1px solid #4b4030;
-  color: #e1bd78;
-  background: #17130c;
+.reportStatus.lost {
+  border: 1px solid #645038;
+  background: #161108;
+  color: #ddb974;
 }
 
-.reportType.found {
-  border: 1px solid #28513f;
-  color: #54e0ac;
-  background: #0b1813;
+.reportStatus.found {
+  border: 1px solid #2e5945;
+  background: #091710;
+  color: #54dfaa;
 }
 
-.reportCardBody strong {
+.reportItem strong {
   display: block;
-  font-size: 10px;
+  font-size: 9px;
 }
 
-.reportCardBody span {
+.reportItem small {
   display: block;
-  margin-top: 3px;
-  color: #59665f;
+  margin-top: 2px;
+  color: #56645d;
+  font-size: 6px;
+}
+
+.reportItem p {
+  margin: 5px 0 0;
+  color: #68746e;
   font-size: 7px;
-}
-
-.reportCardBody p {
-  margin: 6px 0 0;
-  color: #6c7772;
-  font-size: 8px;
   line-height: 1.4;
 }
 
-.cardArrow {
-  color: #4edca8;
+.reportItem > b {
+  color: #4cdba5;
 }
 
-/* MAP */
+/* =========================================================
+   WORLD MAP
+========================================================= */
 
-.mapArea {
+.worldMapArea {
   position: relative;
   overflow: hidden;
-  border: 1px solid #202a25;
-  border-radius: 21px;
+  border: 1px solid #213029;
+  border-radius: 19px;
   background: #07100c;
 }
 
-.realMap {
+.worldMap {
   position: absolute;
   inset: 0;
 }
 
-.realMap::after {
+.worldMapArea::after {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
+
   background:
-    radial-gradient(circle at 50% 50%, transparent 35%, rgba(4, 9, 7, .27) 100%),
-    linear-gradient(rgba(5, 17, 12, .18), rgba(5, 17, 12, .18));
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 48%,
+      rgba(3,8,6,.24) 100%
+    ),
+    linear-gradient(
+      rgba(1,18,11,.1),
+      rgba(1,18,11,.1)
+    );
 }
 
-.mapTopOverlay {
+.worldStatus {
   position: absolute;
-  z-index: 5;
-  top: 14px;
+  z-index: 4;
+  top: 13px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 18px;
-  padding: 9px 13px;
-  border: 1px solid #2a3933;
+  gap: 16px;
+  padding: 8px 12px;
+  border: 1px solid #294036;
   border-radius: 999px;
-  background: rgba(5, 10, 8, .88);
+  background: rgba(4,9,7,.9);
   backdrop-filter: blur(12px);
-  color: #7d8984;
-  font-size: 8px;
-  font-weight: 800;
+  color: #74827b;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
 }
 
-.mapTopOverlay div {
+.worldStatus span {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.mapPulse {
-  width: 6px;
-  height: 6px;
+.worldStatus i {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #48e7ac;
-  box-shadow: 0 0 11px #48e7ac;
+  background: #48e3aa;
+  box-shadow: 0 0 9px #48e3aa;
 }
 
-.mapMarker {
-  width: 42px;
-  height: 42px;
+.worldStatus b {
+  color: #4fdca8;
+}
+
+.mapLegend {
+  position: absolute;
+  z-index: 4;
+  left: 13px;
+  bottom: 13px;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #28382f;
+  border-radius: 10px;
+  background: rgba(4,9,7,.9);
+  color: #7a8781;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.mapLegend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mapLegend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.lostDot {
+  background: #d8b16d;
+}
+
+.foundDot {
+  background: #48e2aa;
+}
+
+/* MapLibre buttons */
+
+.maplibregl-ctrl-group {
+  overflow: hidden !important;
+  border: 1px solid #2b3b33 !important;
+  border-radius: 10px !important;
+  background: #07100c !important;
+  box-shadow: none !important;
+}
+
+.maplibregl-ctrl-group button {
+  background-color: #07100c !important;
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: #203029 !important;
+}
+
+.maplibregl-ctrl-icon {
+  filter: invert(1) opacity(.75);
+}
+
+/* Lost / found markers */
+
+.worldMarker {
+  position: relative;
+  width: 55px;
+  height: 52px;
   border: 0;
   background: transparent;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.mapMarker span {
-  width: 17px;
-  height: 17px;
-  border: 4px solid #08100c;
+.markerCore {
+  position: absolute;
+  top: 5px;
+  width: 15px;
+  height: 15px;
+  border: 4px solid #07100c;
   border-radius: 50%;
+  z-index: 2;
 }
 
-.mapMarker small {
-  margin-top: 3px;
+.markerPulse {
+  position: absolute;
+  top: 2px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  opacity: .38;
+  animation: markerPulse 1.8s ease-out infinite;
+}
+
+.worldMarker small {
+  position: absolute;
+  top: 24px;
   padding: 3px 5px;
-  border-radius: 5px;
-  background: rgba(5, 10, 8, .9);
+  border-radius: 4px;
+  background: rgba(4,9,7,.9);
   font-size: 5px;
   font-weight: 900;
+  letter-spacing: .1em;
 }
 
-.mapMarker.lost span {
-  background: #d5ad69;
-  box-shadow: 0 0 15px rgba(213, 173, 105, .7);
+.worldMarker.lost .markerCore {
+  background: #d8b16d;
+  box-shadow: 0 0 14px rgba(216,177,109,.8);
 }
 
-.mapMarker.lost small {
-  color: #d7b375;
+.worldMarker.lost .markerPulse {
+  border: 1px solid #d8b16d;
 }
 
-.mapMarker.found span {
-  background: #48e7ac;
-  box-shadow: 0 0 16px rgba(72, 231, 172, .75);
+.worldMarker.lost small {
+  color: #dfbb79;
 }
 
-.mapMarker.found small {
-  color: #54e7b0;
+.worldMarker.found .markerCore {
+  background: #48e3aa;
+  box-shadow: 0 0 14px rgba(72,227,170,.8);
 }
 
-.selectedReportPanel {
+.worldMarker.found .markerPulse {
+  border: 1px solid #48e3aa;
+}
+
+.worldMarker.found small {
+  color: #52e5ae;
+}
+
+.draftLocationMarker {
+  width: 24px;
+  height: 24px;
+  border: 5px solid #08110d;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 3px #4be1aa,
+    0 0 25px rgba(75,225,170,.7);
+}
+
+/* =========================================================
+   MAP REPORT PANEL
+========================================================= */
+
+.mapReportPanel {
   position: absolute;
-  z-index: 7;
-  right: 16px;
-  top: 16px;
-  width: 300px;
-  padding: 16px;
-  border: 1px solid #304139;
-  border-radius: 17px;
-  background: rgba(7, 12, 10, .94);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, .35);
+  z-index: 5;
+  top: 14px;
+  right: 14px;
+  width: 305px;
+  padding: 15px;
+  border: 1px solid #31483e;
+  border-radius: 16px;
+  background: rgba(5,10,8,.94);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 70px rgba(0,0,0,.35);
 }
 
-.selectedTop {
+.mapReportTop {
   display: flex;
   justify-content: space-between;
 }
 
-.selectedTop button {
+.mapReportTop button {
   border: 0;
-  background: transparent;
-  color: #66736d;
+  background: none;
+  color: #68766f;
   font-size: 18px;
   cursor: pointer;
 }
 
-.selectedReportPanel h2 {
-  margin: 13px 0 3px;
-  font-size: 25px;
-  letter-spacing: -.05em;
+.mapReportPanel h2 {
+  margin: 12px 0 3px;
+  font-size: 24px;
+  letter-spacing: -.045em;
 }
 
-.selectedMeta {
-  color: #56dca9;
+.reportMeta {
+  color: #4ddda8;
+  font-size: 7px;
+}
+
+.mapReportPanel > p {
+  margin: 9px 0 0;
+  color: #717d77;
   font-size: 8px;
+  line-height: 1.5;
 }
 
-.selectedReportPanel > p {
-  margin-top: 11px;
-  color: #77827d;
-  font-size: 9px;
-  line-height: 1.55;
+.coordinates {
+  margin-top: 12px;
+  padding: 9px;
+  border: 1px solid #23342c;
+  border-radius: 9px;
+  background: #07100c;
 }
 
-.matchSection {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid #222b27;
+.coordinates span,
+.coordinates strong {
+  display: block;
 }
 
-.matchTitle {
+.coordinates span {
+  color: #51605a;
+  font-size: 5px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.coordinates strong {
+  margin-top: 3px;
+  color: #8b9892;
+  font-size: 7px;
+}
+
+.matchArea {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid #202a25;
+}
+
+.matchHeading {
   display: flex;
   justify-content: space-between;
-  color: #59665f;
-  font-size: 7px;
+  color: #4fdba7;
+  font-size: 6px;
   font-weight: 900;
   letter-spacing: .12em;
 }
 
-.matchTitle span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.matchTitle strong {
-  color: #54e2ac;
-}
-
-.matchCard {
+.possibleMatch {
   width: 100%;
-  margin-top: 7px;
-  padding: 10px;
+  margin-top: 6px;
+  padding: 9px;
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  border: 1px solid #223029;
-  border-radius: 10px;
-  background: #0a100d;
-  color: white;
+  border: 1px solid #24372e;
+  border-radius: 9px;
+  background: #08110d;
   text-align: left;
   cursor: pointer;
 }
 
-.matchCard strong,
-.matchCard span {
+.possibleMatch strong,
+.possibleMatch small {
   display: block;
 }
 
-.matchCard strong {
-  font-size: 9px;
-}
-
-.matchCard span {
-  margin-top: 3px;
-  color: #5f6d66;
-  font-size: 6px;
-}
-
-.matchCard b {
-  color: #54e2ac;
-  font-size: 12px;
-}
-
-.placingHint {
-  position: absolute;
-  z-index: 10;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  padding: 12px 18px;
-  border: 1px solid #42c993;
-  border-radius: 12px;
-  background: #08120e;
-  box-shadow: 0 0 35px rgba(72, 231, 172, .13);
-}
-
-.placingHint strong,
-.placingHint span {
-  display: block;
-  text-align: center;
-}
-
-.placingHint strong {
-  color: #55e3ad;
-  font-size: 10px;
-}
-
-.placingHint span {
-  margin-top: 4px;
-  color: #728078;
+.possibleMatch strong {
   font-size: 8px;
 }
 
-/* MODAL */
+.possibleMatch small {
+  margin-top: 3px;
+  color: #5f6d66;
+  font-size: 5px;
+}
 
-.reportModalBackdrop {
+.possibleMatch > b {
+  color: #4ee0aa;
+  font-size: 11px;
+}
+
+/* =========================================================
+   LOCATION PICKING
+========================================================= */
+
+.placePinMessage {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  width: 280px;
+  padding: 12px;
+  border: 1px solid #44d9a3;
+  border-radius: 12px;
+  background: rgba(5,14,10,.96);
+  text-align: center;
+  box-shadow: 0 0 35px rgba(68,217,163,.13);
+}
+
+.placePinMessage span,
+.placePinMessage strong,
+.placePinMessage small {
+  display: block;
+}
+
+.placePinMessage span {
+  color: #47dfa8;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .16em;
+}
+
+.placePinMessage strong {
+  margin-top: 5px;
+  font-size: 10px;
+}
+
+.placePinMessage small {
+  margin-top: 4px;
+  color: #6b7871;
+  font-size: 7px;
+}
+
+/* =========================================================
+   REPORT MODAL
+========================================================= */
+
+.reportBackdrop {
   position: fixed;
   z-index: 100;
   inset: 0;
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(0, 0, 0, .72);
-  backdrop-filter: blur(8px);
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(9px);
 }
 
-.reportModal {
-  width: min(560px, 100%);
-  padding: 22px;
-  border: 1px solid #30433a;
-  border-radius: 22px;
-  background: #080d0b;
-  box-shadow: 0 25px 100px rgba(0, 0, 0, .55);
+.reportForm {
+  width: min(560px,100%);
+  padding: 21px;
+  border: 1px solid #324a3f;
+  border-radius: 20px;
+  background: #060b08;
+  box-shadow: 0 30px 100px rgba(0,0,0,.55);
 }
 
-.modalHeader {
+.formHeader {
   display: flex;
   justify-content: space-between;
 }
 
-.modalHeader h2 {
-  margin: 7px 0 0;
-  font-size: 28px;
+.formHeader > div > span {
+  color: #4ddca7;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .17em;
+}
+
+.formHeader h2 {
+  margin: 6px 0 0;
+  font-size: 27px;
   letter-spacing: -.05em;
 }
 
-.modalClose {
+.formHeader button {
   border: 0;
   background: transparent;
   color: #617069;
-  font-size: 25px;
+  font-size: 23px;
   cursor: pointer;
 }
 
-.formGrid {
-  margin-top: 22px;
+.formFields {
+  margin-top: 18px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 11px;
+  gap: 10px;
 }
 
-.formGrid label {
-  display: block;
-}
-
-.formGrid label.full {
+.formFields label.full {
   grid-column: 1 / -1;
 }
 
-.formGrid label > span,
-.locationPicker > div > span {
+.formFields label > span,
+.selectedLocation span {
   display: block;
-  margin-bottom: 6px;
-  color: #53615a;
-  font-size: 7px;
+  margin-bottom: 5px;
+  color: #54615b;
+  font-size: 6px;
   font-weight: 900;
   letter-spacing: .14em;
 }
 
-.formGrid input,
-.formGrid select,
-.formGrid textarea {
+.formFields input,
+.formFields textarea,
+.formFields select {
   width: 100%;
-  border: 1px solid #27332e;
-  border-radius: 10px;
-  outline: none;
-  background: #050807;
-  color: #e8eeeb;
-  padding: 12px;
-  font-size: 9px;
+  padding: 11px;
+  border: 1px solid #26332d;
+  border-radius: 9px;
+  outline: 0;
+  background: #030605;
+  color: #edf3ef;
+  font-size: 8px;
 }
 
-.formGrid textarea {
-  min-height: 86px;
+.formFields textarea {
+  min-height: 80px;
   resize: vertical;
 }
 
-.locationPicker {
-  margin-top: 12px;
+.selectedLocation {
+  margin-top: 11px;
+  padding: 11px;
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding: 12px;
-  border: 1px solid #25322c;
-  border-radius: 11px;
-  background: #090f0c;
+  align-items: center;
+  border: 1px solid #26352e;
+  border-radius: 10px;
+  background: #08100c;
 }
 
-.locationPicker strong {
-  color: #87938d;
-  font-size: 9px;
-}
-
-.locationPicker button {
-  border: 1px solid #315441;
-  border-radius: 8px;
-  background: #0d1a14;
-  color: #55dfaa;
-  padding: 9px 11px;
+.selectedLocation strong {
+  color: #8b9891;
   font-size: 8px;
-  font-weight: 800;
-  cursor: pointer;
 }
 
-.submitReport {
-  width: 100%;
-  height: 49px;
-  margin-top: 13px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 0;
-  border-radius: 11px;
-  padding: 0 15px;
-  background: #48e7ac;
-  color: #04100b;
-  font-size: 9px;
+.selectedLocation button {
+  padding: 8px 10px;
+  border: 1px solid #315742;
+  border-radius: 8px;
+  background: #0a1912;
+  color: #50dda8;
+  font-size: 7px;
   font-weight: 900;
   cursor: pointer;
 }
 
-.submitReport strong {
-  font-size: 18px;
+.activateSignal {
+  width: 100%;
+  height: 47px;
+  margin-top: 11px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 10px;
+  background: #48e1aa;
+  color: #04110b;
+  font-size: 8px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
+.activateSignal strong {
+  font-size: 17px;
+}
+
+/* =========================================================
+   ANIMATIONS
+========================================================= */
+
+@keyframes radarSweep {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes markerPulse {
+  0% {
+    transform: scale(.65);
+    opacity: .6;
+  }
+
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
 @media (max-width: 900px) {
-  .lfPage {
+  .findHome {
     overflow: auto;
   }
 
-  .lfTopbar {
+  .modeGrid {
+    flex-direction: column;
+  }
+
+  .modeCard {
+    min-height: 520px;
+  }
+
+  .modeCard.selected,
+  .modeCard.dimmed {
+    flex: none;
+  }
+
+  .lostFoundApp {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .appTopbar {
     height: auto;
     grid-template-columns: 1fr auto;
   }
 
-  .lfTabs {
+  .appTabs {
     grid-column: 1 / -1;
     grid-row: 2;
     overflow-x: auto;
   }
 
-  .lfTabs button {
+  .appTabs button {
     white-space: nowrap;
   }
 
-  .lfWorkspace {
+  .mapControlsTop {
+    display: none;
+  }
+
+  .lostWorkspace {
     height: auto;
     grid-template-columns: 1fr;
   }
 
-  .lfSidebar {
+  .lostSidebar {
+    min-height: 580px;
+  }
+
+  .worldMapArea {
+    height: 70vh;
     min-height: 600px;
   }
 
-  .mapArea {
-    min-height: 650px;
+  .mapReportPanel {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
   }
 
-  .selectedReportPanel {
-    left: 12px;
-    right: 12px;
-    top: auto;
-    bottom: 12px;
-    width: auto;
+  .findFooter {
+    padding-bottom: 8px;
   }
 }
