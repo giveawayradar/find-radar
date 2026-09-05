@@ -159,6 +159,9 @@ export default function Home() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState("");
   const [mapMode, setMapMode] = useState<"map" | "list">("map");
+  const [locationColor, setLocationColor] = useState("#3f8dff");
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [radarSplashOpen, setRadarSplashOpen] = useState(false);
 
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -182,10 +185,18 @@ export default function Home() {
       }
       const choice = localStorage.getItem("find-radar-location-choice");
       if (choice) setLocationChoiceMade(true);
+      const savedColor = localStorage.getItem("find-radar-location-color");
+      if (savedColor) setLocationColor(savedColor);
     } catch {
       // Local persistence is optional.
     }
   }, []);
+
+  useEffect(() => {
+    if (!radarSplashOpen) return;
+    const timer = window.setTimeout(() => setRadarSplashOpen(false), 1450);
+    return () => window.clearTimeout(timer);
+  }, [radarSplashOpen]);
 
   useEffect(() => {
     if (screen === "lost-found" && !locationChoiceMade && !privateLocation) {
@@ -309,11 +320,12 @@ export default function Home() {
 
     const el = document.createElement("div");
     el.className = "privateLocationMarker";
-    el.innerHTML = `<span class="privateHalo"></span><span class="privateDot"></span><div class="privateLabel"><b>You (private)</b><small>Only visible to you</small></div>`;
+    el.style.setProperty("--private-color", locationColor);
+    el.innerHTML = `<span class="privateHalo"></span><span class="privateDot"></span><div class="privateLabel"><b>Your location</b><small><span class="privacyLock">◆</span> Private · only visible to you</small></div>`;
     privateMarkerRef.current = new Marker({ element: el, anchor: "center" })
       .setLngLat([privateLocation.lng, privateLocation.lat])
       .addTo(map);
-  }, [privateLocation, mapReady]);
+  }, [privateLocation, mapReady, locationColor]);
 
   const filteredReports = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -344,6 +356,7 @@ export default function Home() {
   function chooseMode(mode: Mode) {
     if (mode === "lost") {
       setSelectedMode("lost");
+      setRadarSplashOpen(true);
       setScreen("lost-found");
       return;
     }
@@ -383,6 +396,13 @@ export default function Home() {
     privateMarkerRef.current?.remove();
     privateMarkerRef.current = null;
     localStorage.setItem("find-radar-location-choice", "declined");
+  }
+
+
+  function chooseLocationColor(color: string) {
+    setLocationColor(color);
+    localStorage.setItem("find-radar-location-color", color);
+    setColorPickerOpen(false);
   }
 
   function showWorld() {
@@ -537,7 +557,7 @@ export default function Home() {
           <div className={`privateLocationCard ${privateLocation ? "enabled" : ""}`}>
             <span className="privateLocationIcon">⌖</span>
             <div><b>{privateLocation ? "Your location is private" : "Use your location (private)"}</b><small>{privateLocation ? "Visible only on your screen — never added to public reports." : "See nearby signals. Your exact location stays visible only to you."}</small></div>
-            {privateLocation ? <button onClick={disablePrivateLocation}>On</button> : <button onClick={requestPrivateLocation}>Enable</button>}
+            {privateLocation ? <div className="privateLocationActions"><button className="locationColorButton" onClick={() => setColorPickerOpen(true)} title="Change your private marker color"><i style={{ background: locationColor }}/><span>Color</span></button><button onClick={disablePrivateLocation}>On</button></div> : <button onClick={requestPrivateLocation}>Enable</button>}
           </div>
 
           <div className="sidebarStats"><div><strong>1,482</strong><small>Lost items</small></div><div><strong>1,103</strong><small>Found items</small></div><div><strong>78</strong><small>Countries</small></div></div>
@@ -576,6 +596,39 @@ export default function Home() {
         </section>
       </section>
 
+      {radarSplashOpen && (
+        <div className="radarSplash" aria-hidden="true">
+          <div className="radarSplashCard">
+            <div className="radarSplashLogo">
+              <span className="splashRing ringOne"/><span className="splashRing ringTwo"/><span className="splashRing ringThree"/>
+              <span className="splashSweep"/><span className="splashCore"/>
+            </div>
+            <div className="radarSplashWordmark"><strong>Find <em>Radar</em></strong><span>LOST &amp; FOUND</span></div>
+            <div className="splashProgress"><i/></div>
+          </div>
+        </div>
+      )}
+
+      {colorPickerOpen && (
+        <div className="colorPickerBackdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setColorPickerOpen(false); }}>
+          <div className="colorPickerPanel">
+            <button className="colorPickerClose" onClick={() => setColorPickerOpen(false)}>×</button>
+            <span className="sectionEyebrow">PRIVATE MAP MARKER</span>
+            <h2>Choose your color</h2>
+            <p>This only changes how <b>your private location</b> looks on your own map.</p>
+            <div className="colorChoices">
+              {["#3f8dff", "#8b5cf6", "#ec4899", "#ef4444", "#f59e0b", "#facc15", "#51f0b4", "#14b8a6", "#38bdf8", "#6366f1", "#8ff7df", "#f4f7f6"].map((color) => (
+                <button key={color} className={locationColor === color ? "active" : ""} style={{ ["--swatch" as string]: color }} onClick={() => chooseLocationColor(color)} aria-label={`Use ${color} for my location`}><i/></button>
+              ))}
+            </div>
+            <div className="colorPreview">
+              <span className="previewPrivateMarker" style={{ ["--private-color" as string]: locationColor }}><i/></span>
+              <div><b>Your location</b><small>Private · only visible to you</small></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {locationPromptOpen && (
         <div className="locationConsentBackdrop">
           <div className="locationConsent">
@@ -583,7 +636,7 @@ export default function Home() {
             <span className="sectionEyebrow">PRIVATE LOCATION</span>
             <h2>See what&apos;s near you?</h2>
             <p>Find Radar can place <b>you</b> on the map and sort nearby lost &amp; found signals. Your live location is only rendered on your device — it is not published as a report or shared with other users.</p>
-            <div className="consentPreview"><span className="miniYou"><i/></span><div><b>You (private)</b><small>Only visible to you</small></div></div>
+            <div className="consentPreview"><span className="miniYou" style={{ ["--private-color" as string]: locationColor }}><i/></span><div><b>Your location</b><small>Private · visible only on this device</small></div></div>
             <button className="allowLocation" onClick={requestPrivateLocation}>Allow my location <span>↗</span></button>
             <button className="notNow" onClick={declinePrivateLocation}>Not now</button>
           </div>
