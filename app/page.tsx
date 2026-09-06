@@ -3,7 +3,7 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import AuthButton from "@/components/AuthButton";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { LngLatBounds, Map, Marker, NavigationControl } from "maplibre-gl";
+import { LngLatBounds, Map as MapLibreGLMap, Marker, NavigationControl } from "maplibre-gl";
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from "maplibre-gl";
 
 type Mode = "lost" | "products" | "restock";
@@ -388,7 +388,7 @@ export default function Home() {
 
     let map: MapLibreMap | null = null;
     try {
-      map = new Map({
+      map = new MapLibreGLMap({
         container: mapContainer.current,
         center: [16.9252, 52.4064],
         zoom: 10.9,
