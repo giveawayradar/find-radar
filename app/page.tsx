@@ -84,6 +84,22 @@ type RestockWatch = {
 
 const categories = ["Wallet", "Keys", "Phone", "Bag", "Clothing", "Jewellery", "Electronics", "Documents", "Pet", "Other"];
 
+function restockGroupKey(title: string, variant?: string) {
+  const folded = `${title} ${variant || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const model = folded.match(/\b(?=[a-z0-9]{5,}\b)(?=[a-z0-9]*[a-z])(?=[a-z0-9]*\d)[a-z0-9]+\b/g)?.sort((a,b)=>b.length-a.length)[0];
+  if (model) return model;
+  const setNumber = folded.match(/\b\d{5,6}\b/)?.[0];
+  if (setNumber) return `set-${setNumber}`;
+  return folded.split(/\s+/).filter(Boolean).slice(0, 5).join("-") || title.toLowerCase();
+}
+
+function restockStatusFromAvailability(value?: string): RestockWatch["status"] {
+  const v = (value || "").toLowerCase();
+  if (/in.?stock|available|dost[eę]pn|w magazynie/.test(v)) return "in_stock";
+  if (/out.?of.?stock|sold.?out|unavailable|brak|niedost[eę]pn/.test(v)) return "out_of_stock";
+  return "unknown";
+}
+
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const r = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -910,21 +926,50 @@ export default function Home() {
       if (!/^https?:\/\//i.test(input)) {
         const response = await fetch("/api/product-search", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: input, budget: restockTargetPrice, currency: restockCurrency, country: restockCountry, condition: "Any", mustHave: restockVariant, exclude: "", sources: ["stores","marketplaces"] }),
+          body: JSON.stringify({ query: input, budget: "", currency: restockCurrency, country: restockCountry, condition: "Any", mustHave: restockVariant, exclude: "", sources: ["stores","marketplaces"] }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.error || "Could not identify that product.");
-        const direct = Array.isArray(payload.results) ? payload.results.filter((item: {resultType?:string;url?:string}) => item.resultType !== "similar" && item.url).slice(0, 5) : [];
-        if (!direct.length) throw new Error("Radar could not verify an exact product page. Paste a product URL or make the description more exact.");
-        const verified: RestockCandidate[] = [];
-        for (const item of direct) {
+        const direct = Array.isArray(payload.directResults) ? payload.directResults.slice(0, 8) : Array.isArray(payload.results) ? payload.results.filter((item: {resultType?:string;url?:string}) => item.resultType !== "similar" && item.url).slice(0, 8) : [];
+        if (!direct.length) throw new Error("Radar could not verify an exact product. Make the description more exact or paste a product URL.");
+
+        const checked = await Promise.all(direct.map(async (item: RestockCandidate & { evidence?: string; evidenceLabel?: string }) => {
+          let live: RestockCandidate | null = null;
           try {
             const check = await fetch("/api/restock-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: item.url }) });
-            const checked = await check.json();
-            if (check.ok && checked.product?.verified) verified.push(checked.product);
-          } catch { /* one retailer can fail without killing the whole target */ }
+            const payload = await check.json();
+            if (check.ok && payload.product?.verified) live = payload.product as RestockCandidate;
+          } catch { /* keep verified discovery data */ }
+          return {
+            title: live?.title || item.title,
+            url: live?.url || item.url,
+            source: live?.source || item.source,
+            price: live?.price || item.price,
+            numericPrice: live?.numericPrice ?? item.numericPrice,
+            currency: live?.currency || item.currency || restockCurrency,
+            availability: live?.availability && live.availability !== "Unknown" ? live.availability : item.availability,
+            image: live?.image || item.image,
+            verified: Boolean(live?.verified || item.verified),
+          } satisfies RestockCandidate;
+        }));
+
+        const byStore = new Map<string, RestockCandidate>();
+        for (const candidate of checked) {
+          if (!candidate.verified) continue;
+          const key = candidate.source.toLowerCase().replace(/^www\./, "");
+          const current = byStore.get(key);
+          if (!current || (candidate.numericPrice != null && current.numericPrice == null)) byStore.set(key, candidate);
         }
-        if (!verified.length) throw new Error("Radar found exact listings but could not verify stock on them. Paste one exact product URL to monitor that retailer directly.");
+        const verified = [...byStore.values()].sort((a,b) => {
+          const aStock = restockStatusFromAvailability(a.availability) === "in_stock" ? 1 : 0;
+          const bStock = restockStatusFromAvailability(b.availability) === "in_stock" ? 1 : 0;
+          if (aStock !== bStock) return bStock - aStock;
+          if (a.numericPrice != null && b.numericPrice != null) return a.numericPrice - b.numericPrice;
+          if (a.numericPrice != null) return -1;
+          if (b.numericPrice != null) return 1;
+          return a.source.localeCompare(b.source);
+        });
+        if (!verified.length) throw new Error("Radar found the product but could not verify a retailer page. Paste one exact product URL to watch that store directly.");
         setRestockCandidates(verified);
         setRestockCandidate(verified[0]);
       } else {
@@ -946,10 +991,10 @@ export default function Home() {
       setRestockError("You are already watching this exact listing."); return false;
     }
     const target = restockTargetPrice.trim() ? Number(restockTargetPrice.replace(",", ".")) : null;
-    const status = /in.?stock/i.test(candidate.availability || "") ? "in_stock" : /out.?of.?stock|sold.?out|unavailable/i.test(candidate.availability || "") ? "out_of_stock" : "unknown";
+    const status = restockStatusFromAvailability(candidate.availability);
     const { data, error } = await supabase.from("find_radar_restock_watches").insert({
       user_id: accountUserId, title: candidate.title, url: candidate.url, source: candidate.source, image: candidate.image ?? null,
-      variant: variantValue || null, target_price: Number.isFinite(target as number) ? target : null, currency: restockCurrency,
+      variant: variantValue || null, target_price: Number.isFinite(target as number) ? target : null, currency: candidate.currency || restockCurrency,
       status, previous_status: status, current_price: candidate.numericPrice ?? null, last_checked_at: new Date().toISOString(),
     }).select("id,user_id,title,url,source,image,variant,target_price,currency,status,previous_status,current_price,last_checked_at,created_at").single();
     if (error) { if (error.code !== "23505") setRestockError(error.message); return false; }
@@ -973,11 +1018,12 @@ export default function Home() {
       const response = await fetch("/api/restock-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: watch.url }) });
       const payload = await response.json(); if (!response.ok) throw new Error(payload?.error || "Scan failed.");
       const p = payload.product as RestockCandidate;
-      const nextStatus: RestockWatch["status"] = /in.?stock/i.test(p.availability || "") ? "in_stock" : /out.?of.?stock|sold.?out|unavailable/i.test(p.availability || "") ? "out_of_stock" : "unknown";
+      const nextStatus = restockStatusFromAvailability(p.availability);
       const checked = Date.now();
-      const { error } = await supabase.from("find_radar_restock_watches").update({ previous_status: watch.status, status: nextStatus, current_price: p.numericPrice ?? null, last_checked_at: new Date(checked).toISOString(), title: p.title || watch.title, image: p.image ?? watch.image ?? null }).eq("id",watch.id).eq("user_id",accountUserId);
+      const nextPrice = p.numericPrice ?? watch.currentPrice;
+      const { error } = await supabase.from("find_radar_restock_watches").update({ previous_status: watch.status, status: nextStatus, current_price: nextPrice ?? null, last_checked_at: new Date(checked).toISOString(), title: p.title || watch.title, image: p.image ?? watch.image ?? null }).eq("id",watch.id).eq("user_id",accountUserId);
       if (error) throw error;
-      setRestockWatches((current)=>current.map((item)=>item.id===watch.id?{...item,previousStatus:item.status,status:nextStatus,currentPrice:p.numericPrice,lastCheckedAt:checked,title:p.title||item.title,image:p.image||item.image}:item));
+      setRestockWatches((current)=>current.map((item)=>item.id===watch.id?{...item,previousStatus:item.status,status:nextStatus,currentPrice:nextPrice,lastCheckedAt:checked,title:p.title||item.title,image:p.image||item.image}:item));
     } catch (error) { if (!quiet) setRestockError(error instanceof Error ? error.message : "Scan failed."); }
     finally { setRestockScanningId(null); }
   }
@@ -987,6 +1033,14 @@ export default function Home() {
     const { error } = await supabase.from("find_radar_restock_watches").delete().eq("id",watch.id).eq("user_id",accountUserId);
     if (error) { setRestockError(error.message); return; }
     setRestockWatches((current)=>current.filter((item)=>item.id!==watch.id));
+  }
+
+  async function deleteRestockGroup(watches: RestockWatch[]) {
+    if (!accountUserId || !watches.length || !window.confirm(`Stop watching this product across ${watches.length} store${watches.length===1?"":"s"}?`)) return;
+    const ids = watches.map((watch)=>watch.id);
+    const { error } = await supabase.from("find_radar_restock_watches").delete().in("id", ids).eq("user_id", accountUserId);
+    if (error) { setRestockError(error.message); return; }
+    setRestockWatches((current)=>current.filter((item)=>!ids.includes(item.id)));
   }
 
   async function scanAllRestockWatches() {
@@ -999,10 +1053,11 @@ export default function Home() {
           const payload = await response.json();
           if (!response.ok) continue;
           const p = payload.product as RestockCandidate;
-          const nextStatus: RestockWatch["status"] = /in.?stock/i.test(p.availability || "") ? "in_stock" : /out.?of.?stock|sold.?out|unavailable/i.test(p.availability || "") ? "out_of_stock" : "unknown";
+          const nextStatus = restockStatusFromAvailability(p.availability);
           const checked = Date.now();
-          await supabase.from("find_radar_restock_watches").update({ previous_status: watch.status, status: nextStatus, current_price: p.numericPrice ?? null, last_checked_at: new Date(checked).toISOString(), title: p.title || watch.title, image: p.image ?? watch.image ?? null }).eq("id",watch.id).eq("user_id",accountUserId);
-          setRestockWatches((current)=>current.map((item)=>item.id===watch.id?{...item,previousStatus:item.status,status:nextStatus,currentPrice:p.numericPrice,lastCheckedAt:checked,title:p.title||item.title,image:p.image||item.image}:item));
+          const nextPrice = p.numericPrice ?? watch.currentPrice;
+          await supabase.from("find_radar_restock_watches").update({ previous_status: watch.status, status: nextStatus, current_price: nextPrice ?? null, last_checked_at: new Date(checked).toISOString(), title: p.title || watch.title, image: p.image ?? watch.image ?? null }).eq("id",watch.id).eq("user_id",accountUserId);
+          setRestockWatches((current)=>current.map((item)=>item.id===watch.id?{...item,previousStatus:item.status,status:nextStatus,currentPrice:nextPrice,lastCheckedAt:checked,title:p.title||item.title,image:p.image||item.image}:item));
         } catch { /* keep scanning remaining stores */ }
       }
     } finally { setRestockBulkScanning(false); }
@@ -1080,7 +1135,25 @@ export default function Home() {
   if (screen === "restock") {
     const detected = restockWatches.filter((w) => w.status === "in_stock" && w.previousStatus && w.previousStatus !== "in_stock");
     const targetHits = restockWatches.filter((w) => w.status === "in_stock" && w.targetPrice != null && w.currentPrice != null && w.currentPrice <= w.targetPrice);
-    const filteredRestockWatches = restockWatches.filter((watch) => restockFilter === "all" ? true : restockFilter === "attention" ? (watch.status === "unknown" || (watch.status === "in_stock" && watch.targetPrice != null && watch.currentPrice != null && watch.currentPrice <= watch.targetPrice)) : restockFilter === "out" ? watch.status === "out_of_stock" : watch.status === "in_stock");
+    const grouped = [...restockWatches.reduce((map, watch) => {
+      const key = restockGroupKey(watch.title, watch.variant);
+      const current = map.get(key) || [];
+      current.push(watch); map.set(key, current); return map;
+    }, new Map<string, RestockWatch[]>()).entries()].map(([key, watches]) => {
+      const priced = watches.filter((w)=>w.currentPrice != null).sort((a,b)=>(a.currentPrice||0)-(b.currentPrice||0));
+      const best = priced[0];
+      const inStock = watches.filter((w)=>w.status==="in_stock");
+      const out = watches.filter((w)=>w.status==="out_of_stock");
+      const unknown = watches.filter((w)=>w.status==="unknown");
+      const targetHit = watches.some((w)=>w.status==="in_stock"&&w.targetPrice!=null&&w.currentPrice!=null&&w.currentPrice<=w.targetPrice);
+      const restocked = watches.some((w)=>w.status==="in_stock"&&w.previousStatus&&w.previousStatus!=="in_stock");
+      const representative = watches.find((w)=>w.image) || watches[0];
+      return { key, watches, best, inStock, out, unknown, targetHit, restocked, representative };
+    }).sort((a,b)=>Number(b.restocked)-Number(a.restocked)||Number(b.targetHit)-Number(a.targetHit)||b.inStock.length-a.inStock.length);
+    const filteredGroups = grouped.filter((group) => restockFilter === "all" ? true : restockFilter === "attention" ? (group.restocked || group.targetHit || group.unknown.length>0) : restockFilter === "out" ? group.out.length===group.watches.length : group.inStock.length>0);
+    const candidatePrices = restockCandidates.filter((c)=>c.numericPrice!=null).sort((a,b)=>(a.numericPrice||0)-(b.numericPrice||0));
+    const bestCandidate = candidatePrices[0];
+
     return (
       <main className="restockApp">
         <div className="productGridBg" />
@@ -1090,9 +1163,9 @@ export default function Home() {
           <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a><AuthButton /></div>
         </header>
 
-        <section className="restockHero">
-          <div><span className="sectionEyebrow">RESTOCK WATCH / LIVE AVAILABILITY MONITOR</span><h1>Set the target. <em>Radar keeps watch.</em></h1><p>Track one exact product page or let Radar identify the product first. Track the exact item across verified store pages, compare live stock, and surface the first useful restock or price hit while your dashboard is open.</p></div>
-          <div className="restockPulse"><span>MULTI-STORE WATCH ENGINE</span><b>{restockBulkScanning || restockScanningId ? "SCANNING" : `${restockWatches.length} LIVE WATCH${restockWatches.length===1?"":"ES"}`}</b><i className={restockBulkScanning || restockScanningId ? "spinning" : ""}/></div>
+        <section className="restockHero restockHeroFinal">
+          <div><span className="sectionEyebrow">RESTOCK WATCH / MULTI-STORE MONITOR</span><h1>Track it once. <em>Radar watches the market.</em></h1><p>Lock onto one exact product, verify every retailer Radar can prove, then monitor stock and price as one target instead of juggling separate store alerts.</p></div>
+          <div className="restockTrustRow"><span><b>✓</b> Verified pages only</span><span><b>◎</b> Multi-store target</span><span><b>↓</b> Price tracking</span></div>
         </section>
 
         {detected.length > 0 && <section className="restockDetected"><span>RESTOCK DETECTED</span><b>{detected[0].title}</b><small>{detected[0].source}{detected[0].currentPrice ? ` · ${detected[0].currentPrice} ${detected[0].currency}` : ""} · IN STOCK</small><a href={detected[0].url} target="_blank" rel="noreferrer">VIEW PRODUCT ↗</a></section>}
@@ -1100,41 +1173,39 @@ export default function Home() {
         <section className="restockWorkspace">
           <form className="restockComposer" onSubmit={identifyRestockTarget}>
             <div className="briefHeader"><div><span>01 / TARGET</span><h2>What should Radar watch?</h2></div><span className="briefStatus">EXACT TARGET</span></div>
-            <label className="productMainQuery"><span>PRODUCT URL OR EXACT DESCRIPTION</span><textarea value={restockInput} onChange={(e)=>setRestockInput(e.target.value)} placeholder="Paste a sold-out product URL, or type e.g. LEGO 75367 Venator Class Republic Attack Cruiser"/></label>
+            <label className="productMainQuery"><span>PRODUCT URL OR EXACT DESCRIPTION</span><textarea value={restockInput} onChange={(e)=>setRestockInput(e.target.value)} placeholder="Sony WH-1000XM5 black, LEGO 75367, RTX 5070 16 GB…"/></label>
             <div className="restockFormGrid">
-              <label><span>EXACT VARIANT</span><input value={restockVariant} onChange={(e)=>setRestockVariant(e.target.value)} placeholder="e.g. Black · 256 GB · Size 42"/></label>
+              <label><span>EXACT VARIANT</span><input value={restockVariant} onChange={(e)=>setRestockVariant(e.target.value)} placeholder="Optional: Black · 256 GB · Size 42"/></label>
               <label><span>TARGET PRICE</span><div className="fieldPair"><input inputMode="decimal" value={restockTargetPrice} onChange={(e)=>setRestockTargetPrice(e.target.value.replace(/[^0-9.,]/g,""))} placeholder="Optional"/><select value={restockCurrency} onChange={(e)=>setRestockCurrency(e.target.value)}><option>PLN</option><option>EUR</option><option>USD</option></select></div></label>
               <label><span>REGION</span><select value={restockCountry} onChange={(e)=>setRestockCountry(e.target.value)}><option>Poland</option><option>European Union</option><option>Worldwide</option></select></label>
             </div>
-            <button className="restockIdentify" disabled={!restockInput.trim() || restockLoading}>{restockLoading ? "Identifying target…" : "Identify exact product ↗"}</button>
+            <button className="restockIdentify" disabled={!restockInput.trim() || restockLoading}>{restockLoading ? "Scanning verified stores…" : "Find & verify product ↗"}</button>
             {restockError && <div className="restockError">{restockError}</div>}
             {!accountUserId && <div className="restockLoginNote">Browsing is open, but you need your shared Radar account to save a watch.</div>}
           </form>
 
           <section className="restockTargetPreview">
-            <div className="briefHeader"><div><span>02 / VERIFY</span><h2>{restockCandidate ? "Target locked" : "Verify before watching"}</h2></div></div>
-            {restockCandidate ? <div className="targetSelection">
-              <div className="targetChoiceList">{restockCandidates.map((candidate)=><button type="button" key={candidate.url} className={`targetChoice ${restockCandidate.url===candidate.url?"active":""}`} onClick={()=>setRestockCandidate(candidate)}>{candidate.image?<img src={candidate.image} alt=""/>:<span>◉</span>}<div><b>{candidate.source}</b><strong>{candidate.title}</strong><small>{candidate.price || "Price not exposed"} · {candidate.availability || "Availability unknown"}</small></div></button>)}</div>
-              <div className="targetLockCard">
-                {restockCandidate.image ? <img src={restockCandidate.image} alt=""/> : <div className="targetFallback">◉</div>}
-                <div><span>{restockCandidate.source}</span><h3>{restockCandidate.title}</h3><p>{restockCandidate.price || "Price not exposed"} · {restockCandidate.availability || "Availability unknown"}</p><a href={restockCandidate.url} target="_blank" rel="noreferrer">Open verified page ↗</a></div>
-                <button onClick={()=>void createRestockWatch()} disabled={!accountUserId || restockLoading}>Watch this store</button>
-                {restockCandidates.length>1&&<button className="watchAllStores" onClick={()=>void watchAllRestockCandidates()} disabled={!accountUserId || restockLoading}>Watch all {restockCandidates.length} verified stores</button>}
+            <div className="briefHeader"><div><span>02 / VERIFY</span><h2>{restockCandidate ? "Verified target" : "Verify before watching"}</h2></div>{restockCandidates.length>0&&<span className="briefStatus">{restockCandidates.length} STORE{restockCandidates.length===1?"":"S"}</span>}</div>
+            {restockCandidate ? <div className="targetSelection targetSelectionFinal">
+              <div className="targetSummaryCard">
+                <div className="targetSummaryIdentity">{restockCandidate.image?<img src={restockCandidate.image} alt=""/>:<span>◉</span>}<div><small>EXACT PRODUCT</small><h3>{restockCandidate.title}</h3><p>{restockVariant || "Variant locked by product identity"}</p></div></div>
+                <div className="targetSummaryStats"><div><span>VERIFIED STORES</span><b>{restockCandidates.length}</b></div><div><span>BEST PRICE</span><b>{bestCandidate?.numericPrice!=null ? `${bestCandidate.numericPrice} ${bestCandidate.currency||restockCurrency}` : "—"}</b></div><div><span>IN STOCK</span><b>{restockCandidates.filter((c)=>restockStatusFromAvailability(c.availability)==="in_stock").length}</b></div></div>
               </div>
-            </div> : <div className="restockEmpty"><div className="restockRadar"><i/><i/><i/><span>◎</span></div><h3>One target. Every verified store.</h3><p>Describe the exact product and Radar can lock onto several verified listings at once. Watch one retailer or monitor every verified store it finds.</p></div>}
+              <div className="targetStoreTable">{restockCandidates.map((candidate)=><button type="button" key={candidate.url} className={`targetStoreRow ${restockCandidate.url===candidate.url?"active":""}`} onClick={()=>setRestockCandidate(candidate)}><span className="storeDot">{candidate.image?<img src={candidate.image} alt=""/>:"◎"}</span><b>{candidate.source}</b><strong>{candidate.numericPrice!=null?`${candidate.numericPrice} ${candidate.currency||restockCurrency}`:candidate.price||"Price unavailable"}</strong><i className={restockStatusFromAvailability(candidate.availability)}>{restockStatusFromAvailability(candidate.availability)==="in_stock"?"● In stock":restockStatusFromAvailability(candidate.availability)==="out_of_stock"?"● Out of stock":"● Unknown"}</i><a href={candidate.url} target="_blank" rel="noreferrer" onClick={(e)=>e.stopPropagation()}>View ↗</a></button>)}</div>
+              <div className="targetWatchActions"><button onClick={()=>void watchAllRestockCandidates()} disabled={!accountUserId || restockLoading}>{restockLoading?"Saving…":`Watch this product${restockCandidates.length>1?` (${restockCandidates.length} stores)`:""}`}</button><small>One target in your dashboard. Every verified store stays underneath it.</small></div>
+            </div> : <div className="restockEmpty"><div className="restockRadar"><i/><i/><i/><span>◎</span></div><h3>One product. Every verified store.</h3><p>Radar only calls a retailer verified when it can identify the actual product listing. No fake stock status and no search-page scores.</p></div>}
           </section>
         </section>
 
-        <section className="watchDashboard">
-          <div className="watchDashboardHead"><div><span>03 / WATCHLIST</span><h2>{restockWatches.length ? `${restockWatches.length} listing${restockWatches.length===1?"":"s"} monitored` : "No active watches yet"}</h2><p>{restockWatches.length?`${restockWatches.filter(w=>w.status==="out_of_stock").length} out of stock · ${restockWatches.filter(w=>w.status==="in_stock").length} in stock · ${targetHits.length} price target hit${targetHits.length===1?"":"s"}`:"Build one target above, then let Radar cover several stores."}</p></div><div className="watchHeadActions"><button onClick={()=>void scanAllRestockWatches()} disabled={restockBulkScanning || !!restockScanningId || !restockWatches.length}>{restockBulkScanning?"Scanning all…":"Scan all"}</button><div className="monitoringPill"><i/> RADAR ACTIVE</div></div></div>
-          {restockWatches.length>0&&<div className="watchFilters"><button className={restockFilter==="all"?"active":""} onClick={()=>setRestockFilter("all")}>All <b>{restockWatches.length}</b></button><button className={restockFilter==="attention"?"active":""} onClick={()=>setRestockFilter("attention")}>Attention <b>{restockWatches.filter(w=>w.status==="unknown"||(w.status==="in_stock"&&w.targetPrice!=null&&w.currentPrice!=null&&w.currentPrice<=w.targetPrice)).length}</b></button><button className={restockFilter==="out"?"active":""} onClick={()=>setRestockFilter("out")}>Out of stock <b>{restockWatches.filter(w=>w.status==="out_of_stock").length}</b></button><button className={restockFilter==="in"?"active":""} onClick={()=>setRestockFilter("in")}>In stock <b>{restockWatches.filter(w=>w.status==="in_stock").length}</b></button></div>}
-          <div className="watchGrid">
-            {filteredRestockWatches.map((watch)=>{ const priceGood = watch.targetPrice == null || (watch.currentPrice != null && watch.currentPrice <= watch.targetPrice); const detectedNow = watch.status === "in_stock" && watch.previousStatus && watch.previousStatus !== "in_stock"; const targetHit = watch.status === "in_stock" && watch.targetPrice != null && watch.currentPrice != null && watch.currentPrice <= watch.targetPrice; return <article className={`watchCard ${detectedNow?"detected":""} ${targetHit?"targetHit":""}`} key={watch.id}>
-              <div className="watchImage">{watch.image?<img src={watch.image} alt=""/>:<span>◉</span>}</div>
-              <div className="watchBody"><div className="watchTop"><span>{watch.source}</span>{detectedNow&&<b>RESTOCK DETECTED</b>}{targetHit&&!detectedNow&&<b>PRICE TARGET HIT</b>}</div><h3>{watch.title}</h3>{watch.variant&&<p className="watchVariant">Variant: {watch.variant}</p>}<div className="watchMetrics"><span className={`stockState ${watch.status}`}>● {watch.status==="in_stock"?"IN STOCK":watch.status==="out_of_stock"?"OUT OF STOCK":"STATUS UNKNOWN"}</span>{watch.currentPrice!=null&&<span className={priceGood?"priceGood":""}>{watch.currentPrice} {watch.currency}</span>}{watch.targetPrice!=null&&<span>Target ≤ {watch.targetPrice} {watch.currency}</span>}</div><small>{watch.lastCheckedAt?`Last scan ${new Date(watch.lastCheckedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"Not scanned yet"}</small></div>
-              <div className="watchActions"><button onClick={()=>void scanRestockWatch(watch)} disabled={!!restockScanningId}>{restockScanningId===watch.id?"Scanning…":"Scan now"}</button><a href={watch.url} target="_blank" rel="noreferrer">View ↗</a><button className="watchDelete" onClick={()=>void deleteRestockWatch(watch)}>×</button></div>
+        <section className="watchDashboard watchDashboardFinal">
+          <div className="watchDashboardHead"><div><span>03 / YOUR WATCHLIST</span><h2>{grouped.length ? `${grouped.length} active target${grouped.length===1?"":"s"}` : "No active watches yet"}</h2><p>{grouped.length?`${restockWatches.length} store listing${restockWatches.length===1?"":"s"} · ${restockWatches.filter(w=>w.status==="in_stock").length} in stock · ${targetHits.length} target-price hit${targetHits.length===1?"":"s"}`:"Build one target above. Radar groups all verified stores into one monitor."}</p></div><div className="watchHeadActions"><button onClick={()=>void scanAllRestockWatches()} disabled={restockBulkScanning || !!restockScanningId || !restockWatches.length}>{restockBulkScanning?"Scanning market…":"Scan all stores"}</button><div className="monitoringPill"><i/> RADAR ACTIVE</div></div></div>
+          {grouped.length>0&&<div className="watchFilters"><button className={restockFilter==="all"?"active":""} onClick={()=>setRestockFilter("all")}>All <b>{grouped.length}</b></button><button className={restockFilter==="attention"?"active":""} onClick={()=>setRestockFilter("attention")}>Attention <b>{grouped.filter(g=>g.restocked||g.targetHit||g.unknown.length>0).length}</b></button><button className={restockFilter==="out"?"active":""} onClick={()=>setRestockFilter("out")}>Fully out <b>{grouped.filter(g=>g.out.length===g.watches.length).length}</b></button><button className={restockFilter==="in"?"active":""} onClick={()=>setRestockFilter("in")}>Available <b>{grouped.filter(g=>g.inStock.length>0).length}</b></button></div>}
+          <div className="targetWatchGrid">
+            {filteredGroups.map((group)=>{ const rep=group.representative; const target=group.watches.find(w=>w.targetPrice!=null)?.targetPrice; return <article className={`targetWatchCard ${group.restocked?"detected":""} ${group.targetHit?"targetHit":""}`} key={group.key}>
+              <div className="targetWatchHeader"><div className="targetWatchImage">{rep.image?<img src={rep.image} alt=""/>:<span>◎</span>}</div><div className="targetWatchIdentity"><div className="watchTop"><span>{group.key.toUpperCase()}</span>{group.restocked&&<b>RESTOCK DETECTED</b>}{group.targetHit&&!group.restocked&&<b>PRICE TARGET HIT</b>}</div><h3>{rep.title}</h3>{rep.variant&&<p>Variant: {rep.variant}</p>}{target!=null&&<small>Target price ≤ {target} {rep.currency}</small>}</div><div className="targetWatchSummary"><div><span>STORES</span><b>{group.watches.length}</b></div><div><span>IN STOCK</span><b className="good">{group.inStock.length}</b></div><div><span>OUT</span><b>{group.out.length}</b></div><div><span>BEST PRICE</span><b className="good">{group.best?.currentPrice!=null?`${group.best.currentPrice} ${group.best.currency}`:"—"}</b></div></div><button className="groupDelete" onClick={()=>void deleteRestockGroup(group.watches)}>×</button></div>
+              <div className="storeWatchRows">{group.watches.sort((a,b)=>Number(b.status==="in_stock")-Number(a.status==="in_stock")||((a.currentPrice??Infinity)-(b.currentPrice??Infinity))).map((watch)=><div className="storeWatchRow" key={watch.id}><span className={`stockDot ${watch.status}`}/><b>{watch.source}</b><span className={`storeStatus ${watch.status}`}>{watch.status==="in_stock"?"In stock":watch.status==="out_of_stock"?"Out of stock":"Unknown"}</span><strong>{watch.currentPrice!=null?`${watch.currentPrice} ${watch.currency}`:"Price unavailable"}</strong><small>{watch.lastCheckedAt?`Checked ${new Date(watch.lastCheckedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"Not scanned"}</small><button onClick={()=>void scanRestockWatch(watch)} disabled={!!restockScanningId}>{restockScanningId===watch.id?"…":"↻"}</button><a href={watch.url} target="_blank" rel="noreferrer">View ↗</a></div>)}</div>
             </article>})}
-            {filteredRestockWatches.length===0&&restockWatches.length>0&&<div className="watchEmpty"><span>◎</span><b>No watches in this view.</b><p>Try another status filter.</p></div>}{restockWatches.length===0&&<div className="watchEmpty"><span>◌</span><b>Your monitored targets will live here.</b><p>Identify a product above, verify the page, then start watching it.</p></div>}
+            {filteredGroups.length===0&&grouped.length>0&&<div className="watchEmpty"><span>◎</span><b>No targets in this view.</b><p>Try another status filter.</p></div>}{grouped.length===0&&<div className="watchEmpty"><span>◌</span><b>Your monitored products will live here.</b><p>Identify an exact product above, verify the retailers, then let Radar watch the market.</p></div>}
           </div>
         </section>
       </main>
