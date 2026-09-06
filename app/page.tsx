@@ -9,7 +9,7 @@ import type { Map as MapLibreMap, Marker as MapLibreMarker } from "maplibre-gl";
 type Mode = "lost" | "products" | "restock";
 type Screen = "home" | "lost-found";
 type ReportType = "lost" | "found";
-type Filter = "all" | ReportType | "near";
+type Filter = "all" | ReportType | "near" | "mine";
 
 type Report = {
   id: string;
@@ -24,6 +24,8 @@ type Report = {
   lng: number;
   createdAt: number;
   imageDataUrl?: string;
+  userId: string;
+  userEmail?: string;
 };
 
 type PrivateLocation = {
@@ -31,61 +33,6 @@ type PrivateLocation = {
   lng: number;
   accuracy?: number;
 };
-
-const DEMO_REPORTS: Report[] = [
-  {
-    id: "demo-poznan-wallet-lost",
-    type: "lost",
-    title: "Black leather wallet",
-    category: "Wallet",
-    description: "Black leather wallet with bank cards. Last seen near Plac Wolności in Poznań.",
-    date: "2026-09-05",
-    time: "18:20",
-    contact: "Demo report",
-    lat: 52.4077,
-    lng: 16.9252,
-    createdAt: 4,
-  },
-  {
-    id: "demo-poznan-keys-found",
-    type: "found",
-    title: "Car keys (Toyota)",
-    category: "Keys",
-    description: "Toyota key fob found by a tram stop near central Poznań.",
-    date: "2026-09-05",
-    time: "16:10",
-    contact: "Demo report",
-    lat: 52.4144,
-    lng: 16.9413,
-    createdAt: 3,
-  },
-  {
-    id: "demo-poznan-phone",
-    type: "lost",
-    title: "iPhone 13 (black)",
-    category: "Phone",
-    description: "Black iPhone in a clear case. Lost while walking through Jeżyce.",
-    date: "2026-09-05",
-    time: "13:45",
-    contact: "Demo report",
-    lat: 52.4118,
-    lng: 16.8967,
-    createdAt: 2,
-  },
-  {
-    id: "demo-poznan-ring",
-    type: "found",
-    title: "Silver ring",
-    category: "Jewellery",
-    description: "Plain silver ring found beside a bench near Malta Lake.",
-    date: "2026-09-04",
-    time: "12:00",
-    contact: "Demo report",
-    lat: 52.4037,
-    lng: 16.9848,
-    createdAt: 1,
-  },
-];
 
 const categories = ["Wallet", "Keys", "Phone", "Bag", "Clothing", "Jewellery", "Electronics", "Documents", "Pet", "Other"];
 
@@ -119,15 +66,6 @@ function formatDistance(km: number) {
 }
 
 function relativeDate(report: Report) {
-  if (report.id.startsWith("demo-")) {
-    const labels: Record<string, string> = {
-      "demo-poznan-wallet-lost": "2h ago",
-      "demo-poznan-keys-found": "5h ago",
-      "demo-poznan-phone": "8h ago",
-      "demo-poznan-ring": "1d ago",
-    };
-    return labels[report.id] ?? report.date;
-  }
   const elapsed = Date.now() - report.createdAt;
   if (elapsed < 60_000) return "now";
   if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m ago`;
@@ -138,7 +76,7 @@ function relativeDate(report: Report) {
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("home");
   const [selectedMode, setSelectedMode] = useState<Mode | null>(null);
-  const [reports, setReports] = useState<Report[]>(DEMO_REPORTS);
+  const [reports, setReports] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [reportFilter, setReportFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -165,6 +103,9 @@ export default function Home() {
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [radarSplashOpen, setRadarSplashOpen] = useState(false);
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [accountUserId, setAccountUserId] = useState<string | null>(null);
+  const [postingError, setPostingError] = useState("");
+  const [reportsLoading, setReportsLoading] = useState(true);
   const [radarPlus, setRadarPlus] = useState(false);
   const [plusReady, setPlusReady] = useState(false);
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -184,20 +125,43 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("find-radar-reports");
-      if (stored) {
-        const parsed = JSON.parse(stored) as Report[];
-        const unique = parsed.filter((p) => !DEMO_REPORTS.some((d) => d.id === p.id));
-        setReports([...unique, ...DEMO_REPORTS]);
-      }
       const choice = localStorage.getItem("find-radar-location-choice");
       if (choice) setLocationChoiceMade(true);
       const savedColor = localStorage.getItem("find-radar-location-color");
       if (savedColor) setLocationColor(savedColor);
+      localStorage.removeItem("find-radar-reports");
     } catch {
-      // Local persistence is optional.
+      // Local preferences are optional.
     }
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadReports() {
+      setReportsLoading(true);
+      const { data, error } = await supabase
+        .from("find_radar_reports")
+        .select("id,user_id,user_email,type,title,category,description,date,time,contact,lat,lng,created_at,image_data_url")
+        .order("created_at", { ascending: false });
+      if (!alive) return;
+      if (error) {
+        console.warn("Find Radar reports unavailable", error.message);
+        setReports([]);
+        setReportsLoading(false);
+        return;
+      }
+      setReports((data ?? []).map((row) => ({
+        id: row.id, userId: row.user_id, userEmail: row.user_email ?? undefined,
+        type: row.type as ReportType, title: row.title, category: row.category,
+        description: row.description ?? "", date: row.date, time: row.time ?? undefined,
+        contact: row.contact ?? "", lat: Number(row.lat), lng: Number(row.lng),
+        createdAt: new Date(row.created_at).getTime(), imageDataUrl: row.image_data_url ?? undefined,
+      })));
+      setReportsLoading(false);
+    }
+    void loadReports();
+    return () => { alive = false; };
+  }, [supabase]);
 
   useEffect(() => {
     let alive = true;
@@ -207,6 +171,7 @@ export default function Home() {
       if (!alive) return;
 
       setAccountEmail(session?.user?.email ?? null);
+      setAccountUserId(session?.user?.id ?? null);
 
       if (!session?.user) {
         setRadarPlus(false);
@@ -368,10 +333,13 @@ export default function Home() {
       if (reportFilter === "near") {
         if (!privateLocation || distanceKm(privateLocation.lat, privateLocation.lng, report.lat, report.lng) > 20) return false;
       }
+      if (reportFilter === "mine") {
+        if (!accountUserId || report.userId !== accountUserId) return false;
+      }
       if (!term) return true;
       return `${report.title} ${report.category} ${report.description}`.toLowerCase().includes(term);
     });
-  }, [reports, reportFilter, search, privateLocation]);
+  }, [reports, reportFilter, search, privateLocation, accountUserId]);
 
   const matches = useMemo(() => {
     if (!selectedReport) return [];
@@ -452,6 +420,12 @@ export default function Home() {
   }
 
   function openReportModal(type: ReportType) {
+    if (!accountUserId) {
+      setPostingError("Log in or sign up to publish a lost/found report.");
+      window.setTimeout(() => setPostingError(""), 4200);
+      return;
+    }
+    setPostingError("");
     setReportType(type);
     const center = mapRef.current?.getCenter();
     if (privateLocation) setPin({ lat: privateLocation.lat, lng: privateLocation.lng });
@@ -462,39 +436,33 @@ export default function Home() {
   function chooseMapLocation() {
     const map = mapRef.current;
     if (!map) return;
-
     pinBeforePlacementRef.current = { ...pin };
     setModalOpen(false);
     setPlacingPin(true);
     placingPinRef.current = true;
-
     draftMarkerRef.current?.remove();
 
-    const element = document.createElement("div");
-    element.className = "draftLocationMarker draggable";
-    element.innerHTML = "<span></span><i></i>";
-
-    const marker = new Marker({
-      element,
-      anchor: "center",
-      draggable: true,
-    })
-      .setLngLat([pin.lng, pin.lat])
-      .addTo(map);
-
-    marker.on("dragstart", () => element.classList.add("dragging"));
-    marker.on("drag", () => {
-      const position = marker.getLngLat();
-      setPin({ lat: position.lat, lng: position.lng });
+    window.requestAnimationFrame(() => {
+      const currentMap = mapRef.current;
+      if (!currentMap) return;
+      currentMap.resize();
+      const element = document.createElement("div");
+      element.className = "draftLocationMarker draggable";
+      element.innerHTML = '<span></span><i></i><b>DRAG ME</b>';
+      const marker = new Marker({ element, anchor: "center", draggable: true })
+        .setLngLat([pin.lng, pin.lat])
+        .addTo(currentMap);
+      marker.setDraggable(true);
+      const syncPin = () => {
+        const position = marker.getLngLat();
+        setPin({ lat: position.lat, lng: position.lng });
+      };
+      marker.on("dragstart", () => element.classList.add("dragging"));
+      marker.on("drag", syncPin);
+      marker.on("dragend", () => { element.classList.remove("dragging"); syncPin(); });
+      draftMarkerRef.current = marker;
+      currentMap.easeTo({ center: [pin.lng, pin.lat], zoom: Math.max(currentMap.getZoom(), 15), duration: 500 });
     });
-    marker.on("dragend", () => {
-      element.classList.remove("dragging");
-      const position = marker.getLngLat();
-      setPin({ lat: position.lat, lng: position.lng });
-    });
-
-    draftMarkerRef.current = marker;
-    map.easeTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 15), duration: 650 });
   }
 
   function lockMapLocation() {
@@ -548,29 +516,56 @@ export default function Home() {
     processPhoto(event.dataTransfer.files?.[0]);
   }
 
-  function submitReport(event: FormEvent) {
+  async function submitReport(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim()) return;
-    const newReport: Report = {
-      id: crypto.randomUUID(),
-      type: reportType,
-      title: title.trim(),
-      category,
-      description: description.trim(),
-      date,
-      time,
-      contact: contact.trim(),
-      lat: pin.lat,
-      lng: pin.lng,
-      createdAt: Date.now(),
-      imageDataUrl: photoPreview ?? undefined,
-    };
-    const userReports = [newReport, ...reports.filter((r) => !r.id.startsWith("demo-"))];
-    try {
-      localStorage.setItem("find-radar-reports", JSON.stringify(userReports));
-    } catch {
-      setPhotoError("The report was added, but this browser could not persist the image locally.");
+    if (!accountUserId || !accountEmail) {
+      setPostingError("You must be logged in to publish a report.");
+      setModalOpen(false);
+      return;
     }
+    if (!title.trim()) return;
+
+    const { data, error } = await supabase
+      .from("find_radar_reports")
+      .insert({
+        user_id: accountUserId,
+        user_email: accountEmail,
+        type: reportType,
+        title: title.trim(),
+        category,
+        description: description.trim(),
+        date,
+        time: time || null,
+        contact: contact.trim() || null,
+        lat: pin.lat,
+        lng: pin.lng,
+        image_data_url: photoPreview ?? null,
+      })
+      .select("id,user_id,user_email,type,title,category,description,date,time,contact,lat,lng,created_at,image_data_url")
+      .single();
+
+    if (error || !data) {
+      setPhotoError(error?.message || "Could not publish this report.");
+      return;
+    }
+
+    const newReport: Report = {
+      id: data.id,
+      userId: data.user_id,
+      userEmail: data.user_email ?? undefined,
+      type: data.type as ReportType,
+      title: data.title,
+      category: data.category,
+      description: data.description ?? "",
+      date: data.date,
+      time: data.time ?? undefined,
+      contact: data.contact ?? "",
+      lat: Number(data.lat),
+      lng: Number(data.lng),
+      createdAt: new Date(data.created_at).getTime(),
+      imageDataUrl: data.image_data_url ?? undefined,
+    };
+
     setReports((current) => [newReport, ...current]);
     setSelectedReport(newReport);
     setModalOpen(false);
@@ -581,6 +576,25 @@ export default function Home() {
     draftMarkerRef.current?.remove();
     draftMarkerRef.current = null;
     mapRef.current?.flyTo({ center: [newReport.lng, newReport.lat], zoom: 15, duration: 900 });
+  }
+
+  async function deleteReport(report: Report) {
+    if (!accountUserId || report.userId !== accountUserId) return;
+    if (!window.confirm(`Delete “${report.title}”? This cannot be undone.`)) return;
+
+    const { error } = await supabase
+      .from("find_radar_reports")
+      .delete()
+      .eq("id", report.id)
+      .eq("user_id", accountUserId);
+
+    if (error) {
+      setPostingError(error.message);
+      return;
+    }
+
+    setReports((current) => current.filter((item) => item.id !== report.id));
+    setSelectedReport((current) => current?.id === report.id ? null : current);
   }
 
   if (screen === "home") {
@@ -615,15 +629,15 @@ export default function Home() {
           </div>
 
           <div className="quickActions">
-            <button className="lostAction" onClick={() => openReportModal("lost")}><span className="actionIcon">−</span><b>Report Lost</b></button>
-            <button className="foundAction" onClick={() => openReportModal("found")}><span className="actionIcon">+</span><b>Report Found</b></button>
+            <button className="lostAction" onClick={() => openReportModal("lost")}><span className="actionIcon">−</span><b>{accountUserId ? "Report Lost" : "Log in to report"}</b></button>
+            <button className="foundAction" onClick={() => openReportModal("found")}><span className="actionIcon">+</span><b>{accountUserId ? "Report Found" : "Log in to report"}</b></button>
           </div>
 
           <div className="searchBox"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items, locations, or keywords…"/><kbd>Ctrl K</kbd></div>
 
           <div className="filterRow">
             <div className="segmented">
-              {(["all", "lost", "found", "near"] as Filter[]).map((filter) => <button key={filter} className={reportFilter === filter ? "active" : ""} onClick={() => setReportFilter(filter)} disabled={filter === "near" && !privateLocation}>{filter === "all" ? "All" : filter === "near" ? "Near me" : filter[0].toUpperCase() + filter.slice(1)}</button>)}
+              {(["all", "lost", "found", "near", "mine"] as Filter[]).map((filter) => <button key={filter} className={reportFilter === filter ? "active" : ""} onClick={() => setReportFilter(filter)} disabled={(filter === "near" && !privateLocation) || (filter === "mine" && !accountUserId)}>{filter === "all" ? "All" : filter === "near" ? "Near me" : filter === "mine" ? "My posts" : filter[0].toUpperCase() + filter.slice(1)}</button>)}
             </div>
             <button className="moreFilter">More⌄</button>
           </div>
@@ -641,7 +655,7 @@ export default function Home() {
                 </button>
               );
             })}
-            {filteredReports.length === 0 && <div className="emptySignals"><span>⌁</span><b>No signals found</b><p>Try a different search or filter.</p></div>}
+            {reportsLoading ? <div className="emptySignals"><span>⌁</span><b>Loading real signals…</b></div> : filteredReports.length === 0 && <div className="emptySignals"><span>⌁</span><b>{reportFilter === "mine" ? "You haven’t posted anything yet" : "No real signals yet"}</b><p>{reportFilter === "mine" ? "Publish a lost or found item and it will appear here." : "Be the first person to publish a genuine lost or found item."}</p></div>}
           </div>
 
           <div className={`privateLocationCard ${privateLocation ? "enabled" : ""}`}>
@@ -650,7 +664,7 @@ export default function Home() {
             {privateLocation ? <div className="privateLocationActions"><button className="locationColorButton" onClick={() => setColorPickerOpen(true)} title="Change your private marker color"><i style={{ background: locationColor }}/><span>Color</span></button><button onClick={disablePrivateLocation}>On</button></div> : <button onClick={requestPrivateLocation}>Enable</button>}
           </div>
 
-          <div className="sidebarStats"><div><strong>1,482</strong><small>Lost items</small></div><div><strong>1,103</strong><small>Found items</small></div><div><strong>78</strong><small>Countries</small></div></div>
+          <div className="sidebarStats"><div><strong>{lostCount}</strong><small>Lost items</small></div><div><strong>{foundCount}</strong><small>Found items</small></div><div><strong>{accountUserId ? reports.filter((r) => r.userId === accountUserId).length : 0}</strong><small>My posts</small></div></div>
         </aside>
 
         <section className="mapShell">
@@ -666,6 +680,7 @@ export default function Home() {
 
           {placingPin && <div className="pinMode"><div className="crosshair">⌖</div><div><b>Drag the pin to the exact location</b><span>Move the green point, then lock it in when it&apos;s right.</span></div><div className="pinModeActions"><button className="pinCancel" onClick={cancelMapLocation}>Cancel</button><button className="pinLock" onClick={lockMapLocation}>Lock location</button></div></div>}
           {locationError && <div className="toast">{locationError}<button onClick={() => setLocationError("")}>×</button></div>}
+          {postingError && <div className="toast authToast">{postingError}<button onClick={() => setPostingError("")}>×</button></div>}
 
           {selectedReport && (
             <aside className="reportDrawer">
@@ -676,6 +691,7 @@ export default function Home() {
               <div className="drawerCategory">{selectedReport.category}</div>
               <p>{selectedReport.description}</p>
               <div className="coordBox"><span>LOCATION</span><b>{selectedReport.lat.toFixed(5)}, {selectedReport.lng.toFixed(5)}</b></div>
+              {accountUserId === selectedReport.userId && <div className="ownerTools"><span>YOUR POST</span><button onClick={() => void deleteReport(selectedReport)}>Delete post</button></div>}
               <div className="matchHeader"><span>POSSIBLE MATCHES</span><b>{matches.length}</b></div>
               <div className="matchList">{matches.slice(0, 3).map(({ report, score, distance }) => <button key={report.id} className="matchCard" onClick={() => { setSelectedReport(report); mapRef.current?.flyTo({ center: [report.lng, report.lat], zoom: 15, duration: 700 }); }}><div className="scoreRing" style={{ ["--score" as string]: `${score * 3.6}deg` }}><span>{score}%</span></div><div><b>{report.title}</b><small>{formatDistance(distance)} away · {report.category}</small></div><span>↗</span></button>)}{matches.length === 0 && <div className="noMatches">No strong matches yet. The radar keeps comparing new signals.</div>}</div>
               <button className="contactButton">Reveal contact <span>↗</span></button>
