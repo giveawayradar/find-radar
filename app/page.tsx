@@ -7,7 +7,7 @@ import { LngLatBounds, Map, Marker, NavigationControl } from "maplibre-gl";
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from "maplibre-gl";
 
 type Mode = "lost" | "products" | "restock";
-type Screen = "home" | "lost-found";
+type Screen = "home" | "lost-found" | "products";
 type ReportType = "lost" | "found";
 type Filter = "all" | ReportType | "near" | "mine";
 
@@ -93,6 +93,18 @@ function relativeDate(report: Report) {
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("home");
+  const [productQuery, setProductQuery] = useState("");
+  const [productBudget, setProductBudget] = useState("");
+  const [productCurrency, setProductCurrency] = useState("PLN");
+  const [productCountry, setProductCountry] = useState("Poland");
+  const [productCondition, setProductCondition] = useState("Any");
+  const [productMustHave, setProductMustHave] = useState("");
+  const [productExclude, setProductExclude] = useState("");
+  const [productSources, setProductSources] = useState<string[]>(["stores", "marketplaces"]);
+  const [productResults, setProductResults] = useState<Array<{title:string;url:string;source:string;snippet:string;score:number;price?:string}>>([]);
+  const [productSearching, setProductSearching] = useState(false);
+  const [productSearchError, setProductSearchError] = useState("");
+  const [productSearched, setProductSearched] = useState(false);
   const [selectedMode, setSelectedMode] = useState<Mode | null>(null);
   const [reports, setReports] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
@@ -811,6 +823,37 @@ export default function Home() {
       .sort((a, b) => b.updatedAt - a.updatedAt));
   }
 
+  function toggleProductSource(source: string) {
+    setProductSources((current) => current.includes(source) ? current.filter((item) => item !== source) : [...current, source]);
+  }
+
+  async function runProductSearch(event?: FormEvent) {
+    event?.preventDefault();
+    if (!productQuery.trim() || productSearching) return;
+    setProductSearching(true);
+    setProductSearchError("");
+    setProductSearched(true);
+    try {
+      const response = await fetch("/api/product-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: productQuery.trim(), budget: productBudget.trim(), currency: productCurrency,
+          country: productCountry, condition: productCondition, mustHave: productMustHave.trim(),
+          exclude: productExclude.trim(), sources: productSources,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "Product search failed.");
+      setProductResults(Array.isArray(payload.results) ? payload.results : []);
+    } catch (error) {
+      setProductResults([]);
+      setProductSearchError(error instanceof Error ? error.message : "Product search failed.");
+    } finally { setProductSearching(false); }
+  }
+
+  function openProductMode() { setSelectedMode("products"); setScreen("products"); }
+
   async function deleteReport(report: Report) {
     if (!accountUserId || report.userId !== accountUserId) return;
     if (!window.confirm(`Delete “${report.title}”? This cannot be undone.`)) return;
@@ -838,8 +881,54 @@ export default function Home() {
         <section className="landingHero"><div className="eyebrow">OPPORTUNITY RADAR / DISCOVERY ENGINE</div><h1>Find what matters.<br/><span>Before it disappears.</span></h1><p>One radar for things you lost, products you want, and stock you refuse to miss.</p></section>
         <section className="modeStage">
           <button className="modePanel lostMode" onClick={() => chooseMode("lost")}><div className="modeNumber">01</div><div className="modeVisual mapVisual"><div className="miniMapLine l1"/><div className="miniMapLine l2"/><div className="miniMapLine l3"/><div className="miniRadar r1"/><div className="miniRadar r2"/><span className="miniPin lostPin">LOST</span><span className="miniPin foundPin">FOUND</span><span className="matchLink" /></div><div className="modeCopy"><span className="modeTag">RECOVER</span><h2>Lost &amp; Found</h2><p>Broadcast a lost or found item and let location + detail matching connect the dots.</p></div><div className="enterMode">ENTER RADAR <span>↗</span></div></button>
-          <button className={`modePanel ${selectedMode === "products" ? "selectedSoon" : ""}`} onClick={() => setSelectedMode("products")}><div className="modeNumber">02</div><div className="modeVisual productVisual"><div className="scanCircle c1"/><div className="scanCircle c2"/><div className="scanBeam"/><span className="productCore">95</span><span className="floatingSpec s1">SIZE 42</span><span className="floatingSpec s2">≤ 500 zł</span></div><div className="modeCopy"><span className="modeTag">SEARCH</span><h2>Product Finder</h2><p>Describe exactly what you want. Radar searches stores and marketplaces for the closest match.</p></div><div className="enterMode muted">COMING NEXT <span>↗</span></div></button>
+          <button className={`modePanel ${selectedMode === "products" ? "selectedSoon" : ""}`} onClick={openProductMode}><div className="modeNumber">02</div><div className="modeVisual productVisual"><div className="scanCircle c1"/><div className="scanCircle c2"/><div className="scanBeam"/><span className="productCore">95</span><span className="floatingSpec s1">SIZE 42</span><span className="floatingSpec s2">≤ 500 zł</span></div><div className="modeCopy"><span className="modeTag">SEARCH</span><h2>Product Finder</h2><p>Describe exactly what you want. Radar searches stores and marketplaces for the closest match.</p></div><div className="enterMode">ENTER RADAR <span>↗</span></div></button>
           <button className={`modePanel ${selectedMode === "restock" ? "selectedSoon" : ""}`} onClick={() => setSelectedMode("restock")}><div className="modeNumber">03</div><div className="modeVisual stockVisual"><div className="stockOrbit o1"/><div className="stockOrbit o2"/><div className="stockCenter"><small>WATCHING</small><b>LEGO</b><span>≤ 700 zł</span></div><i className="storeNode n1"/><i className="storeNode n2"/><i className="storeNode n3 active"/><i className="storeNode n4"/></div><div className="modeCopy"><span className="modeTag">MONITOR</span><h2>Restock Watch</h2><p>Set the target once. Radar keeps watch and surfaces the moment availability returns.</p></div><div className="enterMode muted">COMING NEXT <span>↗</span></div></button>
+        </section>
+      </main>
+    );
+  }
+
+  if (screen === "products") {
+    const sourceLabels: Record<string,string> = { stores: "Retail stores", marketplaces: "Marketplaces", secondhand: "Second-hand" };
+    return (
+      <main className="productApp">
+        <div className="productGridBg" />
+        <header className="topbar productTopbar">
+          <button className="brandButton" onClick={() => setScreen("home")}><img className="brandLogoImage small" src="/find-radar-logo.svg" alt="Find Radar logo"/><span className="brandText"><strong>Find Radar</strong><small>Product Finder</small></span></button>
+          <nav className="modeTabs"><button onClick={() => setScreen("lost-found")}><span>⌾</span> Lost &amp; Found</button><button className="active"><span>◉</span> Product Finder</button><button onClick={() => { setScreen("home"); setSelectedMode("restock"); }}><span>◌</span> Restock Watch</button></nav>
+          <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a><AuthButton /></div>
+        </header>
+
+        <section className="productHero">
+          <div><span className="sectionEyebrow">PRODUCT FINDER / LIVE WEB SEARCH</span><h1>Describe it. <em>Radar finds it.</em></h1><p>Turn a messy idea into an exact buying brief, then scan stores and marketplaces for the closest real matches.</p></div>
+          <div className="productPulse"><span>SEARCH ENGINE</span><b>{productSearching ? "SCANNING" : "READY"}</b><i className={productSearching ? "spinning" : ""}/></div>
+        </section>
+
+        <section className="productWorkspace">
+          <form className="productBrief" onSubmit={runProductSearch}>
+            <div className="briefHeader"><div><span>01 / TARGET</span><h2>What exactly are you looking for?</h2></div><span className="briefStatus">SPEC BUILDER</span></div>
+            <label className="productMainQuery"><span>DESCRIBE THE PRODUCT</span><textarea value={productQuery} onChange={(e)=>setProductQuery(e.target.value)} placeholder="e.g. Black leather men's jacket, minimal branding, real leather, size M, preferably under 700 zł…"/></label>
+            <div className="productFieldGrid">
+              <label><span>MAX BUDGET</span><div className="fieldPair"><input inputMode="decimal" value={productBudget} onChange={(e)=>setProductBudget(e.target.value.replace(/[^0-9.,]/g,""))} placeholder="No limit"/><select value={productCurrency} onChange={(e)=>setProductCurrency(e.target.value)}><option>PLN</option><option>EUR</option><option>USD</option></select></div></label>
+              <label><span>SHOPPING REGION</span><select value={productCountry} onChange={(e)=>setProductCountry(e.target.value)}><option>Poland</option><option>European Union</option><option>Worldwide</option><option>United States</option><option>United Kingdom</option></select></label>
+              <label><span>CONDITION</span><select value={productCondition} onChange={(e)=>setProductCondition(e.target.value)}><option>Any</option><option>New only</option><option>Used allowed</option><option>Used only</option></select></label>
+            </div>
+            <div className="productFieldGrid two">
+              <label><span>MUST HAVE</span><input value={productMustHave} onChange={(e)=>setProductMustHave(e.target.value)} placeholder="real leather, size M, black"/></label>
+              <label><span>EXCLUDE</span><input value={productExclude} onChange={(e)=>setProductExclude(e.target.value)} placeholder="faux leather, oversized logos"/></label>
+            </div>
+            <div className="sourcePicker"><span>SEARCH SOURCES</span><div>{Object.entries(sourceLabels).map(([key,label])=><button type="button" key={key} className={productSources.includes(key)?"active":""} onClick={()=>toggleProductSource(key)}><i/>{label}</button>)}</div></div>
+            <div className="searchSummary"><div><span>RADAR BRIEF</span><p>{productQuery.trim() || "Your product description will appear here."}</p><small>{productBudget ? `≤ ${productBudget} ${productCurrency}` : "No budget ceiling"} · {productCountry} · {productCondition}</small></div><button className="productSearchButton" disabled={!productQuery.trim() || productSearching}>{productSearching ? <><i/> Scanning the web…</> : <>Run Product Radar <span>↗</span></>}</button></div>
+          </form>
+
+          <section className="productResultsPanel">
+            <div className="resultsHead"><div><span>02 / RESULTS</span><h2>{productSearching ? "Radar is scanning…" : productSearched ? `${productResults.length} matches surfaced` : "Matches will appear here"}</h2></div>{productSearched && !productSearching && <button onClick={()=>void runProductSearch()}>↻ Scan again</button>}</div>
+            {productSearchError && <div className="productSearchError"><b>Search engine needs attention</b><p>{productSearchError}</p><small>Find Radar automatically falls back between live web search and retailer-direct searches, so no separate search key is required.</small></div>}
+            {!productSearched && <div className="productEmpty"><div className="productRadarArt"><i/><i/><i/><span>◎</span></div><h3>Build a target, not a keyword.</h3><p>The more specific you are about size, price, material, color and exclusions, the stronger the ranking becomes.</p><div className="exampleChips"><button onClick={()=>setProductQuery("Sony WH-1000XM5 headphones, black, new or excellent condition")}>Sony XM5 under budget</button><button onClick={()=>setProductQuery("LEGO Star Wars set, sealed, preferably retired or discounted")}>LEGO Star Wars</button><button onClick={()=>setProductQuery("Men's black leather jacket, real leather, minimal branding, size M")}>Leather jacket</button></div></div>}
+            {productSearching && <div className="scanLoading"><div className="scanOrb"><i/></div><b>Scanning stores & marketplaces</b><span>Comparing titles, descriptions and your constraints…</span></div>}
+            {!productSearching && productSearched && !productSearchError && productResults.length===0 && <div className="productEmpty"><h3>No confident matches yet.</h3><p>Try broadening a constraint or enabling another source type.</p></div>}
+            {!productSearching && productResults.length>0 && <div className="productResultList">{productResults.map((result,index)=><a className="productResultCard" href={result.url} target="_blank" rel="noreferrer" key={`${result.url}-${index}`}><div className="matchScore"><b>{result.score}</b><span>MATCH</span></div><div className="resultCopy"><div><span className="resultSource">{result.source}</span>{index===0&&<span className="bestMatch">BEST MATCH</span>}</div><h3>{result.title}</h3><p>{result.snippet}</p></div><div className="resultOpen"><span>OPEN</span>↗</div></a>)}</div>}
+          </section>
         </section>
       </main>
     );
@@ -849,7 +938,7 @@ export default function Home() {
     <main className="radarApp">
       <header className="topbar">
         <button className="brandButton" onClick={() => setScreen("home")}><img className="brandLogoImage small" src="/find-radar-logo.svg" alt="Find Radar logo"/><span className="brandText"><strong>Find Radar</strong><small>Lost &amp; Found</small></span></button>
-        <nav className="modeTabs"><button className="active"><span>⌾</span> Lost &amp; Found</button><button onClick={() => { setScreen("home"); setSelectedMode("products"); }}><span>◉</span> Product Finder</button><button onClick={() => { setScreen("home"); setSelectedMode("restock"); }}><span>◌</span> Restock Watch</button></nav>
+        <nav className="modeTabs"><button className="active"><span>⌾</span> Lost &amp; Found</button><button onClick={openProductMode}><span>◉</span> Product Finder</button><button onClick={() => { setScreen("home"); setSelectedMode("restock"); }}><span>◌</span> Restock Watch</button></nav>
         <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a>{accountUserId && <button className="messagesButton" onClick={() => { setMessagesOpen(true); setActiveConversation(null); }}>Messages{conversations.length > 0 ? <span>{conversations.length}</span> : null}</button>}<button className="iconButton" aria-label="Search">⌕</button><AuthButton /></div>
       </header>
 
