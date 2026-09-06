@@ -1,6 +1,8 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import AuthButton from "@/components/AuthButton";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { LngLatBounds, Map, Marker, NavigationControl } from "maplibre-gl";
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from "maplibre-gl";
 
@@ -8,14 +10,6 @@ type Mode = "lost" | "products" | "restock";
 type Screen = "home" | "lost-found";
 type ReportType = "lost" | "found";
 type Filter = "all" | ReportType | "near";
-
-type RadarAccount = {
-  name: string;
-  email: string;
-  plus: boolean;
-};
-
-type AuthMode = "signin" | "signup";
 
 type Report = {
   id: string;
@@ -170,17 +164,10 @@ export default function Home() {
   const [locationColor, setLocationColor] = useState("#3f8dff");
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [radarSplashOpen, setRadarSplashOpen] = useState(false);
-  const [account, setAccount] = useState<RadarAccount | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>("signin");
-  const [authOpen, setAuthOpen] = useState(false);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [plusOpen, setPlusOpen] = useState(false);
-  const [authName, setAuthName] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
-  const [plusCode, setPlusCode] = useState("");
-  const [plusMessage, setPlusMessage] = useState("");
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [radarPlus, setRadarPlus] = useState(false);
+  const [plusReady, setPlusReady] = useState(false);
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -206,14 +193,51 @@ export default function Home() {
       if (choice) setLocationChoiceMade(true);
       const savedColor = localStorage.getItem("find-radar-location-color");
       if (savedColor) setLocationColor(savedColor);
-      const rememberedAccount = localStorage.getItem("opportunity-radar-account");
-      const sessionAccount = sessionStorage.getItem("opportunity-radar-account");
-      const storedAccount = rememberedAccount || sessionAccount;
-      if (storedAccount) setAccount(JSON.parse(storedAccount) as RadarAccount);
     } catch {
       // Local persistence is optional.
     }
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadSharedAccount() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!alive) return;
+
+      setAccountEmail(session?.user?.email ?? null);
+
+      if (!session?.user) {
+        setRadarPlus(false);
+        setPlusReady(true);
+        return;
+      }
+
+      const { data } = await supabase
+        .from("radar_plus_memberships")
+        .select("status,expires_at")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (!alive) return;
+      setRadarPlus(
+        data?.status === "active" &&
+        typeof data.expires_at === "string" &&
+        new Date(data.expires_at).getTime() > Date.now()
+      );
+      setPlusReady(true);
+    }
+
+    void loadSharedAccount();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      void loadSharedAccount();
+    });
+
+    return () => {
+      alive = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   useEffect(() => {
     if (!radarSplashOpen) return;
@@ -478,50 +502,6 @@ export default function Home() {
     processPhoto(event.dataTransfer.files?.[0]);
   }
 
-  function persistAccount(nextAccount: RadarAccount | null, remember = rememberMe) {
-    setAccount(nextAccount);
-    localStorage.removeItem("opportunity-radar-account");
-    sessionStorage.removeItem("opportunity-radar-account");
-    if (!nextAccount) return;
-    const serialized = JSON.stringify(nextAccount);
-    if (remember) localStorage.setItem("opportunity-radar-account", serialized);
-    else sessionStorage.setItem("opportunity-radar-account", serialized);
-  }
-
-  function submitAuth(event: FormEvent) {
-    event.preventDefault();
-    if (!authEmail.trim() || !authPassword.trim()) return;
-    const displayName = authMode === "signup" ? (authName.trim() || authEmail.split("@")[0]) : (authEmail.split("@")[0] || "Radar user");
-    persistAccount({ name: displayName, email: authEmail.trim(), plus: account?.plus ?? false });
-    setAuthOpen(false);
-    setAccountMenuOpen(false);
-    setAuthPassword("");
-  }
-
-  function signOut() {
-    persistAccount(null);
-    setAccountMenuOpen(false);
-    setPlusOpen(false);
-  }
-
-  function activateRadarPlus(event: FormEvent) {
-    event.preventDefault();
-    if (!account) {
-      setPlusOpen(false);
-      setAuthMode("signin");
-      setAuthOpen(true);
-      return;
-    }
-    if (!plusCode.trim()) {
-      setPlusMessage("Enter your Radar Plus access code.");
-      return;
-    }
-    const upgraded = { ...account, plus: true };
-    persistAccount(upgraded);
-    setPlusMessage("Radar Plus activated on this Find Radar profile.");
-    setPlusCode("");
-  }
-
   function submitReport(event: FormEvent) {
     event.preventDefault();
     if (!title.trim()) return;
@@ -561,7 +541,7 @@ export default function Home() {
     return (
       <main className="landing">
         <div className="landingGrid" /><div className="landingGlow" />
-        <header className="landingHeader"><div className="wordmark"><img className="brandLogoImage" src="/find-radar-logo.svg" alt="Find Radar logo"/><span>FIND <b>RADAR</b></span></div><div className="landingHeaderActions"><div className="systemPill"><i /> SYSTEM ONLINE</div><button className="landingLogin" onClick={() => { setAuthMode("signin"); setAuthOpen(true); }}>Log in</button><button className="landingSignup" onClick={() => { setAuthMode("signup"); setAuthOpen(true); }}>Sign up</button></div></header>
+        <header className="landingHeader"><div className="wordmark"><img className="brandLogoImage" src="/find-radar-logo.svg" alt="Find Radar logo"/><span>FIND <b>RADAR</b></span></div><div className="landingHeaderActions"><div className="systemPill"><i /> SYSTEM ONLINE</div><AuthButton /></div></header>
         <section className="landingHero"><div className="eyebrow">OPPORTUNITY RADAR / DISCOVERY ENGINE</div><h1>Find what matters.<br/><span>Before it disappears.</span></h1><p>One radar for things you lost, products you want, and stock you refuse to miss.</p></section>
         <section className="modeStage">
           <button className="modePanel lostMode" onClick={() => chooseMode("lost")}><div className="modeNumber">01</div><div className="modeVisual mapVisual"><div className="miniMapLine l1"/><div className="miniMapLine l2"/><div className="miniMapLine l3"/><div className="miniRadar r1"/><div className="miniRadar r2"/><span className="miniPin lostPin">LOST</span><span className="miniPin foundPin">FOUND</span><span className="matchLink" /></div><div className="modeCopy"><span className="modeTag">RECOVER</span><h2>Lost &amp; Found</h2><p>Broadcast a lost or found item and let location + detail matching connect the dots.</p></div><div className="enterMode">ENTER RADAR <span>↗</span></div></button>
@@ -577,7 +557,7 @@ export default function Home() {
       <header className="topbar">
         <button className="brandButton" onClick={() => setScreen("home")}><img className="brandLogoImage small" src="/find-radar-logo.svg" alt="Find Radar logo"/><span className="brandText"><strong>Find Radar</strong><small>Lost &amp; Found</small></span></button>
         <nav className="modeTabs"><button className="active"><span>⌾</span> Lost &amp; Found</button><button onClick={() => { setScreen("home"); setSelectedMode("products"); }}><span>◉</span> Product Finder</button><button onClick={() => { setScreen("home"); setSelectedMode("restock"); }}><span>◌</span> Restock Watch</button></nav>
-        <div className="topActions"><button className="plusBadge" onClick={() => setPlusOpen(true)}><span>✦</span>{account?.plus ? "RADAR+" : "Radar Plus"}</button><button className="iconButton" aria-label="Search">⌕</button>{account ? <div className="accountWrap"><button className="avatarButton" onClick={() => setAccountMenuOpen((value) => !value)}>{account.name.slice(0,1).toUpperCase()}</button>{accountMenuOpen && <div className="accountMenu"><div className="accountIdentity"><b>{account.name}</b><small>{account.email}</small></div><button onClick={() => setPlusOpen(true)}><span>✦</span>{account.plus ? "Radar Plus active" : "Get Radar Plus"}</button><button onClick={signOut}>Log out</button></div>}</div> : <><button className="topLogin" onClick={() => { setAuthMode("signin"); setAuthOpen(true); }}>Log in</button><button className="topSignup" onClick={() => { setAuthMode("signup"); setAuthOpen(true); }}>Sign up</button></>}</div>
+        <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a><button className="iconButton" aria-label="Search">⌕</button><AuthButton /></div>
       </header>
 
       <section className="workspace">
@@ -688,40 +668,6 @@ export default function Home() {
               <span className="previewPrivateMarker" style={{ ["--private-color" as string]: locationColor }}><i/></span>
               <div><b>Your location</b><small>Private · only visible to you</small></div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {authOpen && (
-        <div className="accountBackdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setAuthOpen(false); }}>
-          <form className="authPanel" onSubmit={submitAuth}>
-            <button type="button" className="authClose" onClick={() => setAuthOpen(false)}>×</button>
-            <img className="authLogo" src="/find-radar-logo.svg" alt="Find Radar logo"/>
-            <span className="sectionEyebrow">OPPORTUNITY RADAR ACCOUNT</span>
-            <h2>{authMode === "signin" ? "Welcome back." : "Join the radar."}</h2>
-            <p>{authMode === "signin" ? "Sign in to keep your Radar identity, reports and Plus access together." : "Create one account designed to work across the Opportunity Radar ecosystem."}</p>
-            <div className="authTabs"><button type="button" className={authMode === "signin" ? "active" : ""} onClick={() => setAuthMode("signin")}>Log in</button><button type="button" className={authMode === "signup" ? "active" : ""} onClick={() => setAuthMode("signup")}>Sign up</button></div>
-            {authMode === "signup" && <label className="authField"><span>NAME</span><input value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="Your name" autoComplete="name"/></label>}
-            <label className="authField"><span>EMAIL</span><input type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"/></label>
-            <label className="authField"><span>PASSWORD</span><input type="password" required minLength={6} value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="••••••••" autoComplete={authMode === "signin" ? "current-password" : "new-password"}/></label>
-            <label className="rememberRow"><input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)}/><span>Remember me</span><small>Keep me signed in on this device</small></label>
-            <button className="authSubmit" type="submit">{authMode === "signin" ? "Log in to Find Radar" : "Create Radar account"}<span>↗</span></button>
-            <small className="authFootnote">Find Radar account UI is ready for the shared Opportunity Radar backend connection.</small>
-          </form>
-        </div>
-      )}
-
-      {plusOpen && (
-        <div className="accountBackdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setPlusOpen(false); }}>
-          <div className="plusPanel">
-            <button className="authClose" onClick={() => setPlusOpen(false)}>×</button>
-            <div className="plusMark">✦</div>
-            <span className="sectionEyebrow">RADAR PLUS</span>
-            <h2>{account?.plus ? "Radar Plus is active." : "Upgrade your radar."}</h2>
-            <p>{account?.plus ? "Find Radar recognizes this profile as Radar Plus ready." : "One Plus membership is designed to unlock premium features across every Radar."}</p>
-            <div className="plusFeatures"><div><span>01</span><b>Priority matching</b><small>Surface the strongest Lost & Found matches first.</small></div><div><span>02</span><b>More active watches</b><small>Designed for future Product Finder and Restock Watch limits.</small></div><div><span>03</span><b>Shared Radar identity</b><small>Carry Plus status across the Opportunity Radar ecosystem once backend sync is connected.</small></div></div>
-            {account?.plus ? <div className="plusActiveCard"><i/>ACTIVE ON FIND RADAR</div> : <form className="plusCodeForm" onSubmit={activateRadarPlus}><label><span>ACCESS CODE</span><input value={plusCode} onChange={(e) => { setPlusCode(e.target.value); setPlusMessage(""); }} placeholder="Enter Radar Plus code"/></label>{plusMessage && <small className="plusMessage">{plusMessage}</small>}<button type="submit">{account ? "Activate Radar Plus" : "Log in to continue"}<span>↗</span></button></form>}
-            <small className="plusBackendNote">Billing and cross-site Plus verification will connect to the shared Radar backend in the ecosystem pass.</small>
           </div>
         </div>
       )}
