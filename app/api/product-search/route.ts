@@ -47,10 +47,32 @@ type ProductResult = {
   evidenceLabel: string;
   reasons: string[];
   discoveredBy: string[];
+  resultType?: "direct" | "similar";
 };
 
 type StoreSearch = { source: string; url: string; label: string };
 type JsonRecord = Record<string, unknown>;
+
+type ProductCategory =
+  | "over-ear-headphones"
+  | "headphones"
+  | "smartphone"
+  | "laptop"
+  | "monitor"
+  | "keyboard"
+  | "mouse"
+  | "speaker"
+  | "jacket"
+  | "shoes"
+  | "lego"
+  | "generic";
+
+type ProductIntent = {
+  category: ProductCategory;
+  exactModels: string[];
+  brand?: string;
+  categorySeed: string;
+};
 
 type StoreAdapter = {
   domain: string;
@@ -168,6 +190,113 @@ function canonicalQuery(body: Body) {
   return [q, ...must].filter(Boolean).join(" ").trim();
 }
 
+function fold(value?: string) {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const TERM_ALIASES: Record<string, string[]> = {
+  black: ["black", "czarny", "czarna", "czarne", "czerni"],
+  white: ["white", "bialy", "biala", "biale"],
+  blue: ["blue", "niebieski", "niebieska", "niebieskie"],
+  red: ["red", "czerwony", "czerwona", "czerwone"],
+  green: ["green", "zielony", "zielona", "zielone"],
+  silver: ["silver", "srebrny", "srebrna", "srebrne"],
+  gold: ["gold", "golden", "zloty", "zlota", "zlote"],
+  leather: ["leather", "skora", "skorzany", "skorzana", "skorzane"],
+  wireless: ["wireless", "bezprzewodowy", "bezprzewodowa", "bezprzewodowe", "bluetooth"],
+};
+
+function normalizedModel(value: string) {
+  return fold(value).replace(/\s+/g, "");
+}
+
+function exactModelTokens(body: Body) {
+  const source = `${body.query || ""} ${body.mustHave || ""}`;
+  const raw = source.match(/\b(?=[a-z0-9-]{4,}\b)(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]+\b/gi) || [];
+  const noise = new Set(["1200pln", "1000zl", "2026"]);
+  return [...new Set(raw.map(normalizedModel).filter((x) => x.length >= 4 && !noise.has(x)))];
+}
+
+function detectBrand(body: Body) {
+  const q = fold(body.query);
+  const known = ["sony","apple","samsung","bose","sennheiser","lenovo","dell","asus","acer","hp","logitech","razer","nike","adidas","lego","jbl","marshall","xiaomi","google","motorola","huawei","oneplus"];
+  return known.find((brand) => q.split(" ").includes(brand));
+}
+
+function inferIntent(body: Body): ProductIntent {
+  const q = fold(`${body.query || ""} ${body.mustHave || ""}`);
+  const models = exactModelTokens(body);
+  const brand = detectBrand(body);
+  if (/\bwh\s*\d|wh1000|over ear|nauszn|anc|noise cancell/.test(q)) return { category: "over-ear-headphones", exactModels: models, brand, categorySeed: `${brand || ""} wireless ANC over-ear headphones`.trim() };
+  if (/headphone|headset|sluchawk|earphone/.test(q)) return { category: "headphones", exactModels: models, brand, categorySeed: `${brand || ""} headphones`.trim() };
+  if (/iphone|smartphone|telefon|galaxy|pixel/.test(q)) return { category: "smartphone", exactModels: models, brand, categorySeed: `${brand || ""} smartphone`.trim() };
+  if (/laptop|notebook|macbook/.test(q)) return { category: "laptop", exactModels: models, brand, categorySeed: `${brand || ""} laptop`.trim() };
+  if (/monitor|display/.test(q)) return { category: "monitor", exactModels: models, brand, categorySeed: `${brand || ""} monitor`.trim() };
+  if (/keyboard|klawiatur/.test(q)) return { category: "keyboard", exactModels: models, brand, categorySeed: `${brand || ""} keyboard`.trim() };
+  if (/mouse|mysz/.test(q)) return { category: "mouse", exactModels: models, brand, categorySeed: `${brand || ""} computer mouse`.trim() };
+  if (/speaker|glosnik/.test(q)) return { category: "speaker", exactModels: models, brand, categorySeed: `${brand || ""} speaker`.trim() };
+  if (/jacket|kurtk/.test(q)) return { category: "jacket", exactModels: models, brand, categorySeed: `${brand || ""} jacket`.trim() };
+  if (/shoe|sneaker|buty|trainer/.test(q)) return { category: "shoes", exactModels: models, brand, categorySeed: `${brand || ""} shoes`.trim() };
+  if (/lego/.test(q)) return { category: "lego", exactModels: models, brand: "lego", categorySeed: "LEGO set" };
+  return { category: "generic", exactModels: models, brand, categorySeed: canonicalQuery(body) };
+}
+
+function smartPhrasePresent(haystack: string, phrase: string) {
+  const hay = fold(haystack);
+  const target = fold(phrase);
+  if (!target) return true;
+  const compactHay = hay.replace(/\s+/g, "");
+  const compactTarget = target.replace(/\s+/g, "");
+  if (compactHay.includes(compactTarget)) return true;
+  const alias = TERM_ALIASES[target];
+  if (alias && alias.some((term) => hay.includes(fold(term)))) return true;
+  const parts = target.split(" ").filter(Boolean);
+  return parts.every((part) => {
+    const aliases = TERM_ALIASES[part] || [part];
+    return aliases.some((term) => hay.includes(fold(term)));
+  });
+}
+
+function categoryFit(haystack: string, intent: ProductIntent) {
+  const hay = fold(haystack);
+  const has = (...terms: string[]) => terms.some((term) => hay.includes(fold(term)));
+  switch (intent.category) {
+    case "over-ear-headphones":
+      if (has("speaker","glosnik","earbuds","earbud","douszne","dokanałowe","dokanałowe","in-ear","true wireless")) return false;
+      return has("headphones","headphone","sluchawki","sluchawka","nauszne","over ear","anc","noise cancelling");
+    case "headphones":
+      if (has("speaker","glosnik")) return false;
+      return has("headphones","headphone","headset","sluchawki","earbuds","earphones");
+    case "smartphone": return has("smartphone","telefon","iphone","galaxy","pixel","phone");
+    case "laptop": return has("laptop","notebook","macbook");
+    case "monitor": return has("monitor","display") && !has("monitoring","camera");
+    case "keyboard": return has("keyboard","klawiatura") && !has("case","etui");
+    case "mouse": return has("mouse","mysz") && !has("pad","podkladka");
+    case "speaker": return has("speaker","glosnik");
+    case "jacket": return has("jacket","kurtka","coat","plaszcz");
+    case "shoes": return has("shoes","shoe","sneakers","sneaker","buty","trampki");
+    case "lego": return has("lego");
+    default: return true;
+  }
+}
+
+function discoveryQueryVariants(body: Body) {
+  const intent = inferIntent(body);
+  const canonical = canonicalQuery(body);
+  const variants = [canonical];
+  if (intent.exactModels.length) {
+    const model = intent.exactModels[0];
+    variants.push(`${intent.brand || ""} ${model}`.trim());
+    variants.push(`"${model}" ${intent.brand || ""}`.trim());
+  }
+  return [...new Set(variants.filter(Boolean))].slice(0, 3);
+}
+
 function chosenAdapters(body: Body) {
   const selected = new Set(Array.isArray(body.sources) && body.sources.length ? body.sources : ["stores", "marketplaces"]);
   return STORE_ADAPTERS.filter((adapter) => selected.has(adapter.kind)).sort((a, b) => b.priority - a.priority);
@@ -274,7 +403,8 @@ function parseMojeekResults(html: string, body: Body): Candidate[] {
 }
 
 async function webDiscovery(body: Body, adapters: StoreAdapter[]) {
-  const q = canonicalQuery(body);
+  const variants = discoveryQueryVariants(body);
+  const q = variants[1] || variants[0] || canonicalQuery(body);
   const domains = adapters.map((a) => a.domain);
   const siteClause = domains.slice(0, 12).map((d) => `site:${d}`).join(" OR ");
   const query = `${q} ${siteClause}`;
@@ -344,16 +474,22 @@ function jsonLdListingCandidates(html: string, searchUrl: string, adapter: Store
 }
 
 async function directStoreDiscovery(body: Body, adapters: StoreAdapter[]) {
-  const q = canonicalQuery(body);
-  // High-value adapters first; enough coverage without turning a scan into a 30-second crawl.
+  const variants = discoveryQueryVariants(body);
+  // Search both the exact-model query and the full brief when useful. These calls run
+  // concurrently, so broader coverage does not turn into a serial crawl.
+  const queries = [...new Set([variants[1] || variants[0], variants[0]].filter(Boolean))].slice(0, 2);
   const selected = adapters.slice(0, 8);
-  const settled = await Promise.allSettled(selected.map(async (adapter) => {
+  const jobs = selected.flatMap((adapter) => queries.map(async (q) => {
     const searchUrl = adapter.search(q);
     const { html } = await fetchHtml(searchUrl, 4800);
     const json = jsonLdListingCandidates(html, searchUrl, adapter, body);
     const anchors = anchorCandidates(html, searchUrl, adapter, body);
-    return [...json, ...anchors];
+    return [...json, ...anchors].map((candidate) => ({
+      ...candidate,
+      discoveredBy: [...new Set([...candidate.discoveredBy, q === queries[0] ? "exact-query pass" : "brief-query pass"])],
+    }));
   }));
+  const settled = await Promise.allSettled(jobs);
   return settled.flatMap((r) => r.status === "fulfilled" ? r.value : []);
 }
 
@@ -362,7 +498,7 @@ async function tavilySearch(body: Body, adapters: StoreAdapter[], apiKey: string
   const constraints = [body.mustHave && `must include ${body.mustHave}`, body.budget && `under ${body.budget} ${body.currency}`, body.condition, body.country].filter(Boolean).join(", ");
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
-    body: JSON.stringify({ api_key: apiKey, query: `${canonicalQuery(body)}. ${constraints}. Actual purchasable product listing pages only.`, search_depth: "advanced", max_results: 24, include_answer: false, include_raw_content: false, include_images: false, include_domains: domains }),
+    body: JSON.stringify({ api_key: apiKey, query: `${discoveryQueryVariants(body)[1] || canonicalQuery(body)}. ${constraints}. Actual purchasable product listing pages only.`, search_depth: "advanced", max_results: 24, include_answer: false, include_raw_content: false, include_images: false, include_domains: domains }),
     signal: AbortSignal.timeout(7000),
   });
   if (!response.ok) throw new Error(`Tavily ${response.status}`);
@@ -576,6 +712,58 @@ async function enrich(candidate: Candidate, body: Body): Promise<ProductResult |
   };
 }
 
+function isDirectMatch(result: ProductResult, body: Body) {
+  const hay = `${result.title} ${result.snippet} ${result.brand || ""}`;
+  const intent = inferIntent(body);
+  if (!categoryFit(hay, intent)) return false;
+
+  const must = phrases(body.mustHave);
+  if (must.length && !must.every((phrase) => smartPhrasePresent(hay, phrase))) return false;
+
+  const compactHay = fold(hay).replace(/\s+/g, "");
+  if (intent.exactModels.length && !intent.exactModels.every((model) => compactHay.includes(model))) return false;
+
+  const excluded = phrases(body.exclude);
+  if (excluded.some((phrase) => smartPhrasePresent(hay, phrase))) return false;
+  return true;
+}
+
+function similarBody(body: Body): Body | null {
+  const intent = inferIntent(body);
+  if (intent.category === "generic" || !intent.categorySeed) return null;
+  return { ...body, query: intent.categorySeed, mustHave: "", exclude: body.exclude };
+}
+
+function isUsefulSimilar(result: ProductResult, original: Body) {
+  const intent = inferIntent(original);
+  const hay = `${result.title} ${result.snippet} ${result.brand || ""}`;
+  if (!categoryFit(hay, intent)) return false;
+
+  const compactHay = fold(hay).replace(/\s+/g, "");
+  // Alternatives should be genuinely different products, not a duplicate exact-model listing.
+  if (intent.exactModels.some((model) => compactHay.includes(model))) return false;
+
+  const excluded = phrases(original.exclude);
+  if (excluded.some((phrase) => smartPhrasePresent(hay, phrase))) return false;
+
+  if (intent.category === "over-ear-headphones") {
+    const folded = fold(hay);
+    const hasOverEarSignal = ["nauszne","over ear","anc","noise cancelling","wireless","bezprzewodowe","bluetooth"].some((x) => folded.includes(fold(x)));
+    if (!hasOverEarSignal) return false;
+  }
+  return true;
+}
+
+function similarReasons(result: ProductResult, original: Body) {
+  const intent = inferIntent(original);
+  const reasons = ["Same product category"];
+  const max = budget(original);
+  if (max && result.numericPrice !== undefined && (!result.currency || result.currency === original.currency) && result.numericPrice <= max) reasons.push("Within your budget");
+  if (intent.brand && fold(`${result.brand || ""} ${result.title}`).includes(intent.brand)) reasons.push(`Same brand: ${intent.brand}`);
+  if ((result.availability || "").toLowerCase().replace(/\s/g, "").match(/instock|available|dostepn/)) reasons.push("Available now");
+  return [...reasons, ...(result.reasons || []).filter((r) => !/product match|must-have/i.test(r))].slice(0, 5);
+}
+
 function resultIdentity(result: ProductResult) {
   const modelish = tokens(result.title).slice(0, 7).join("|");
   return `${result.source}|${modelish}|${Math.round((result.numericPrice || 0) * 100)}`;
@@ -627,7 +815,7 @@ export async function POST(request: Request) {
     matches.push(...second.flatMap((r) => r.status === "fulfilled" && r.value ? [r.value] : []));
   }
 
-  matches = dedupeResults(matches).sort((a, b) => {
+  const rankResults = (items: ProductResult[]) => dedupeResults(items).sort((a, b) => {
     const max = budget(body);
     if (max) {
       const aComparable = !a.currency || a.currency === body.currency;
@@ -639,22 +827,63 @@ export async function POST(request: Request) {
     const evidenceRank = { page: 3, listing: 2, search: 1 };
     if (evidenceRank[a.evidence] !== evidenceRank[b.evidence]) return evidenceRank[b.evidence] - evidenceRank[a.evidence];
     return b.score - a.score;
-  }).slice(0, 14);
+  });
+
+  const intent = inferIntent(body);
+  let directMatches = rankResults(matches.filter((m) => isDirectMatch(m, body)))
+    .slice(0, 10)
+    .map((m) => ({
+      ...m,
+      resultType: "direct" as const,
+      reasons: [
+        ...(intent.exactModels.length ? ["Exact model confirmed"] : []),
+        ...(phrases(body.mustHave).length ? ["Required specs confirmed"] : []),
+        ...m.reasons,
+      ].filter((reason, index, all) => all.indexOf(reason) === index).slice(0, 5),
+    }));
+  let similarMatches: ProductResult[] = [];
+
+  // Alternatives are a fallback, not padding. We only broaden the radar when there
+  // are zero genuine direct matches, so exact results are never mixed with near-misses.
+  if (directMatches.length === 0) {
+    const altBody = similarBody(body);
+    if (altBody) {
+      const altTasks: Promise<Candidate[]>[] = [];
+      if (apiKey) altTasks.push(tavilySearch(altBody, adapters, apiKey).catch(() => []));
+      altTasks.push(webDiscovery(altBody, adapters).catch(() => []));
+      altTasks.push(directStoreDiscovery(altBody, adapters).catch(() => []));
+      const altCandidates = mergeCandidates((await Promise.all(altTasks)).flat(), adapters).slice(0, 24);
+      const altEnriched = await Promise.allSettled(altCandidates.map((c) => enrich(c, altBody)));
+      similarMatches = rankResults(altEnriched.flatMap((r) => r.status === "fulfilled" && r.value ? [r.value] : [])
+        .filter((m) => isUsefulSimilar(m, body))
+        .filter((m) => m.score >= 64))
+        .slice(0, 8)
+        .map((m) => ({ ...m, resultType: "similar" as const, reasons: similarReasons(m, body) }));
+    }
+  }
+
+  const allResults = [...directMatches, ...similarMatches];
 
   return NextResponse.json({
-    results: matches,
+    results: allResults,
+    directResults: directMatches,
+    similarResults: similarMatches,
     storeSearches: buildStoreSearches(body, adapters),
     provider: providers.length ? [...new Set(providers)].join(" + ") : "Direct store searches",
-    verifiedCount: matches.filter((m) => m.verified).length,
+    verifiedCount: allResults.filter((m) => m.verified).length,
     meta: {
       query: canonicalQuery(body),
       candidatesDiscovered: candidates.length,
       storesScanned: Math.min(adapters.length, 8),
       providers: [...new Set(providers)],
       elapsedMs: Date.now() - started,
-      pageVerified: matches.filter((m) => m.evidence === "page").length,
-      listingVerified: matches.filter((m) => m.evidence === "listing").length,
-      crossChecked: matches.filter((m) => m.evidence === "search" && m.discoveredBy.length >= 2).length,
+      pageVerified: allResults.filter((m) => m.evidence === "page").length,
+      listingVerified: allResults.filter((m) => m.evidence === "listing").length,
+      crossChecked: allResults.filter((m) => m.evidence === "search" && m.discoveredBy.length >= 2).length,
+      directCount: directMatches.length,
+      similarCount: similarMatches.length,
+      inferredCategory: intent.category,
+      exactModels: intent.exactModels,
     },
   });
 }
