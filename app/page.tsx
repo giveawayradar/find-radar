@@ -101,7 +101,8 @@ export default function Home() {
   const [productMustHave, setProductMustHave] = useState("");
   const [productExclude, setProductExclude] = useState("");
   const [productSources, setProductSources] = useState<string[]>(["stores", "marketplaces"]);
-  const [productResults, setProductResults] = useState<Array<{title:string;url:string;source:string;snippet:string;score:number;price?:string}>>([]);
+  const [productResults, setProductResults] = useState<Array<{title:string;url:string;source:string;snippet:string;score:number;price?:string;availability?:string;condition?:string;image?:string;brand?:string;verified?:boolean;reasons?:string[]}>>([]);
+  const [productStoreSearches, setProductStoreSearches] = useState<Array<{source:string;url:string;label:string}>>([]);
   const [productSearching, setProductSearching] = useState(false);
   const [productSearchError, setProductSearchError] = useState("");
   const [productSearched, setProductSearched] = useState(false);
@@ -846,8 +847,10 @@ export default function Home() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || "Product search failed.");
       setProductResults(Array.isArray(payload.results) ? payload.results : []);
+      setProductStoreSearches(Array.isArray(payload.storeSearches) ? payload.storeSearches : []);
     } catch (error) {
       setProductResults([]);
+      setProductStoreSearches([]);
       setProductSearchError(error instanceof Error ? error.message : "Product search failed.");
     } finally { setProductSearching(false); }
   }
@@ -926,8 +929,9 @@ export default function Home() {
             {productSearchError && <div className="productSearchError"><b>Search engine needs attention</b><p>{productSearchError}</p><small>Find Radar automatically falls back between live web search and retailer-direct searches, so no separate search key is required.</small></div>}
             {!productSearched && <div className="productEmpty"><div className="productRadarArt"><i/><i/><i/><span>◎</span></div><h3>Build a target, not a keyword.</h3><p>The more specific you are about size, price, material, color and exclusions, the stronger the ranking becomes.</p><div className="exampleChips"><button onClick={()=>setProductQuery("Sony WH-1000XM5 headphones, black, new or excellent condition")}>Sony XM5 under budget</button><button onClick={()=>setProductQuery("LEGO Star Wars set, sealed, preferably retired or discounted")}>LEGO Star Wars</button><button onClick={()=>setProductQuery("Men's black leather jacket, real leather, minimal branding, size M")}>Leather jacket</button></div></div>}
             {productSearching && <div className="scanLoading"><div className="scanOrb"><i/></div><b>Scanning stores & marketplaces</b><span>Comparing titles, descriptions and your constraints…</span></div>}
-            {!productSearching && productSearched && !productSearchError && productResults.length===0 && <div className="productEmpty"><h3>No confident matches yet.</h3><p>Try broadening a constraint or enabling another source type.</p></div>}
-            {!productSearching && productResults.length>0 && <div className="productResultList">{productResults.map((result,index)=><a className="productResultCard" href={result.url} target="_blank" rel="noreferrer" key={`${result.url}-${index}`}><div className="matchScore"><b>{result.score}</b><span>MATCH</span></div><div className="resultCopy"><div><span className="resultSource">{result.source}</span>{index===0&&<span className="bestMatch">BEST MATCH</span>}</div><h3>{result.title}</h3><p>{result.snippet}</p></div><div className="resultOpen"><span>OPEN</span>↗</div></a>)}</div>}
+            {!productSearching && productSearched && !productSearchError && productResults.length===0 && <div className="productEmpty"><h3>No verified product matches yet.</h3><p>Radar could not verify a real product page from the live scan. Use the store searches below or broaden a constraint — unverified search pages are never given fake match scores.</p></div>}
+            {!productSearching && productResults.length>0 && <div className="productResultList">{productResults.map((result,index)=><a className="productResultCard verifiedProductCard" href={result.url} target="_blank" rel="noreferrer" key={`${result.url}-${index}`}>{result.image&&<div className="productThumb"><img src={result.image} alt=""/></div>}<div className="matchScore"><b>{result.score}</b><span>MATCH</span></div><div className="resultCopy"><div><span className="resultSource">{result.source}</span><span className="verifiedBadge">VERIFIED PAGE</span>{index===0&&<span className="bestMatch">BEST MATCH</span>}</div><h3>{result.title}</h3><div className="productFacts">{result.price&&<strong>{result.price}</strong>}{result.availability&&<span>{result.availability}</span>}{result.condition&&<span>{result.condition}</span>}</div><p>{result.snippet}</p>{result.reasons&&result.reasons.length>0&&<div className="matchReasons">{result.reasons.map((reason)=><span key={reason}>✓ {reason}</span>)}</div>}</div><div className="resultOpen"><span>VIEW PRODUCT</span>↗</div></a>)}</div>}
+            {!productSearching && productSearched && productStoreSearches.length>0 && <div className="storeFallback"><div className="storeFallbackHead"><span>DIRECT STORE SEARCHES</span><h3>Still want to look wider?</h3><p>These open the stores' own search pages. They are useful fallbacks, but Find Radar does not call them matches until it can verify an actual product listing.</p></div><div className="storeFallbackGrid">{productStoreSearches.map((item)=><a key={item.source} href={item.url} target="_blank" rel="noreferrer"><b>{item.source}</b><span>{item.label} ↗</span></a>)}</div></div>}
           </section>
         </section>
       </main>

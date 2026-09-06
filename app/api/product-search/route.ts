@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-type TavilyResult = { title?: string; url?: string; content?: string; score?: number };
 type Body = {
   query?: string;
   budget?: string;
@@ -12,15 +11,34 @@ type Body = {
   sources?: string[];
 };
 
-type SearchResult = {
+type Candidate = {
+  title: string;
+  url: string;
+  source: string;
+  snippet: string;
+  searchScore?: number;
+};
+
+type ProductResult = {
   title: string;
   url: string;
   source: string;
   snippet: string;
   score: number;
   price?: string;
-  kind?: "listing" | "store-search";
+  numericPrice?: number;
+  currency?: string;
+  availability?: string;
+  condition?: string;
+  image?: string;
+  brand?: string;
+  verified: boolean;
+  reasons: string[];
 };
+
+type StoreSearch = { source: string; url: string; label: string };
+
+type JsonRecord = Record<string, unknown>;
 
 const MARKET_DOMAINS = ["allegro.pl", "amazon.pl", "amazon.de", "ebay.pl", "ebay.com", "ceneo.pl"];
 const STORE_DOMAINS = ["mediaexpert.pl", "mediamarkt.pl", "x-kom.pl", "euro.com.pl", "zalando.pl", "aboutyou.pl", "nike.com", "adidas.pl", "lego.com"];
@@ -47,91 +65,49 @@ const DIRECT_SEARCHES: Record<string, (q: string) => string> = {
 };
 
 function host(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "Web";
-  }
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "Web"; }
 }
 
-function decodeHtml(value: string) {
+function stripHtml(value: string) {
   return value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/\s+/g, " ").trim();
 }
 
-function clean(text: string) {
-  return decodeHtml(text).slice(0, 360);
-}
+function clean(value: string, max = 360) { return stripHtml(value).slice(0, max); }
 
 function normalizeDuckUrl(raw: string) {
-  const decoded = decodeHtml(raw);
+  const decoded = stripHtml(raw);
   try {
     const url = new URL(decoded, "https://duckduckgo.com");
     const redirected = url.searchParams.get("uddg");
     if (redirected) return decodeURIComponent(redirected);
-    if (url.hostname.endsWith("duckduckgo.com") && url.pathname.startsWith("/l/")) return "";
+    if (url.hostname.endsWith("duckduckgo.com")) return "";
     return url.toString();
-  } catch {
-    return decoded.startsWith("//") ? `https:${decoded}` : decoded;
-  }
+  } catch { return decoded.startsWith("//") ? `https:${decoded}` : decoded; }
 }
 
-function parsePrice(text: string) {
-  const patterns = [
-    /(?:^|\s)(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{2})?)\s?(zł|PLN)(?:\s|$)/i,
-    /(?:€|EUR\s?)(\d{1,4}(?:[,.]\d{2})?)/i,
-    /(?:\$|USD\s?)(\d{1,4}(?:[,.]\d{2})?)/i,
-  ];
-  for (const p of patterns) {
-    const match = text.match(p);
-    if (match) return match[0].trim();
-  }
-  return undefined;
-}
-
-function numericBudget(value?: string) {
+function parseNumber(value?: string | number | null) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (!value) return null;
-  const n = Number(value.replace(/\s/g, "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? n : null;
+  const cleaned = String(value).replace(/\s/g, "").replace(/[^0-9,.-]/g, "").replace(",", ".");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
 }
 
-function numericPrice(value?: string) {
-  if (!value) return null;
-  const match = value.replace(/\s/g, "").match(/\d+(?:[.,]\d+)?/);
-  return match ? Number(match[0].replace(",", ".")) : null;
+function budget(body: Body) { const n = parseNumber(body.budget); return n && n > 0 ? n : null; }
+
+function tokens(value?: string) {
+  return [...new Set((value || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((x) => x.length > 2))];
 }
 
-function rank(result: { title?: string; content?: string; score?: number; price?: string }, body: Body) {
-  const hay = `${result.title || ""} ${result.content || ""}`.toLowerCase();
-  const wanted = `${body.query || ""} ${body.mustHave || ""}`
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((x) => x.length > 2);
-  const excluded = (body.exclude || "")
-    .toLowerCase()
-    .split(/[,;]+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-  let points = Math.round((result.score ?? 0.52) * 45) + 35;
-  const unique = [...new Set(wanted)];
-  if (unique.length) points += Math.round((unique.filter((w) => hay.includes(w)).length / unique.length) * 24);
-  if (excluded.some((x) => hay.includes(x))) points -= 28;
-
-  const budget = numericBudget(body.budget);
-  const price = numericPrice(result.price);
-  if (budget && price) points += price <= budget ? 8 : -18;
-
-  return Math.max(1, Math.min(99, points));
+function phrases(value?: string) {
+  return (value || "").toLowerCase().split(/[,;]+/).map((x) => x.trim()).filter(Boolean);
 }
 
 function chosenDomains(body: Body) {
@@ -144,204 +120,258 @@ function chosenDomains(body: Body) {
   return [...new Set(domains.length ? domains : [...MARKET_DOMAINS, ...STORE_DOMAINS])];
 }
 
-function buildBrief(body: Body) {
-  return [
-    body.query?.trim(),
-    body.mustHave?.trim(),
-    body.condition && body.condition !== "Any" ? body.condition : "",
-    body.budget ? `under ${body.budget} ${body.currency || ""}` : "",
-    body.country ? `buy ${body.country}` : "",
-    body.exclude
-      ? body.exclude
-          .split(/[,;]+/)
-          .map((x) => x.trim())
-          .filter(Boolean)
-          .map((x) => `-${x.replace(/\s+/g, "-")}`)
-          .join(" ")
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+function buildSearchPhrase(body: Body) {
+  return [body.query?.trim(), body.mustHave?.trim(), body.condition === "New only" ? "new" : body.condition === "Used only" ? "used" : ""]
+    .filter(Boolean).join(" ");
 }
 
-async function tavilySearch(body: Body, domains: string[], apiKey: string): Promise<SearchResult[]> {
-  const constraints = [
-    body.budget ? `maximum price ${body.budget} ${body.currency || ""}` : "",
-    body.country ? `available to buy in ${body.country}` : "",
-    body.condition && body.condition !== "Any" ? body.condition : "",
-    body.mustHave ? `must have: ${body.mustHave}` : "",
-    body.exclude ? `exclude: ${body.exclude}` : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
-
-  const query = `shopping product ${body.query}. ${constraints}. Find specific product listing pages currently for sale, not articles, reviews or category pages.`;
-  const response = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      search_depth: "advanced",
-      max_results: 18,
-      include_answer: false,
-      include_raw_content: false,
-      include_images: false,
-      ...(domains.length ? { include_domains: domains } : {}),
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) throw new Error(`Tavily returned ${response.status}`);
-  const data = await response.json();
-  return ((data.results || []) as TavilyResult[])
-    .filter((r) => r.url && r.title)
-    .map((r) => {
-      const snippet = clean(r.content || "Open this listing to verify current price, stock and specifications.");
-      const price = parsePrice(`${r.title || ""} ${snippet}`);
-      return {
-        title: clean(r.title || "Product match"),
-        url: r.url!,
-        source: host(r.url!),
-        snippet,
-        price,
-        score: rank({ ...r, price }, body),
-        kind: "listing" as const,
-      };
-    });
+function buildStoreSearches(body: Body, domains: string[]): StoreSearch[] {
+  const q = [body.query, body.mustHave].filter(Boolean).join(" ").trim();
+  return domains.filter((d) => DIRECT_SEARCHES[d]).slice(0, 12).map((source) => ({
+    source,
+    url: DIRECT_SEARCHES[source](q),
+    label: `Search ${source}`,
+  }));
 }
 
-function parseDuckResults(html: string, body: Body): SearchResult[] {
-  const results: SearchResult[] = [];
+function isLikelyNonProduct(url: string, title: string) {
+  const u = url.toLowerCase();
+  const t = title.toLowerCase();
+  const badUrl = ["/search", "/szukaj", "/listing?", "/sch/", "/catalog?", "/katalog", "/category", "/blog", "/news", "/guide", "/poradnik"];
+  const badTitle = ["search results", "wyniki wyszukiwania", "category", "kategoria", "poradnik", "review", "recenzja"];
+  return badUrl.some((x) => u.includes(x)) || badTitle.some((x) => t.includes(x));
+}
 
-  // DuckDuckGo HTML result blocks.
-  const blocks = html.match(/<div[^>]+class="[^"]*result[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi) || [];
-  for (const block of blocks) {
-    const link = block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!link) continue;
-    const url = normalizeDuckUrl(link[1]);
-    if (!url || !/^https?:\/\//i.test(url)) continue;
-    const snippetMatch = block.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>|class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-    const snippet = clean(snippetMatch?.[1] || snippetMatch?.[2] || "Open the result to verify live price and stock.");
-    const title = clean(link[2]);
-    const price = parsePrice(`${title} ${snippet}`);
-    results.push({ title, url, source: host(url), snippet, price, score: rank({ title, content: snippet, price }, body), kind: "listing" });
+function parseDuckResults(html: string): Candidate[] {
+  const out: Candidate[] = [];
+  const links = [...html.matchAll(/<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+  for (const m of links) {
+    const url = normalizeDuckUrl(m[1]);
+    const title = clean(m[2], 220);
+    if (!url || !title || !/^https?:\/\//i.test(url)) continue;
+    const pos = html.indexOf(m[0]);
+    const neighborhood = pos >= 0 ? html.slice(pos, pos + 1800) : "";
+    const sm = neighborhood.match(/class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div)>/i);
+    out.push({ title, url, source: host(url), snippet: clean(sm?.[1] || "Product listing discovered on the web.") });
   }
-
-  // DuckDuckGo Lite fallback.
-  if (!results.length) {
-    const liteLinks = [...html.matchAll(/<a[^>]+(?:class=['"]result-link['"]|rel=['"]nofollow['"])[^>]+href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi)];
-    for (const match of liteLinks) {
-      const url = normalizeDuckUrl(match[1]);
-      if (!url || !/^https?:\/\//i.test(url)) continue;
-      const title = clean(match[2]);
-      if (!title) continue;
-      results.push({ title, url, source: host(url), snippet: "Open this result to verify the live listing, current price and availability.", score: rank({ title }, body), kind: "listing" });
+  if (!out.length) {
+    const lite = [...html.matchAll(/<a[^>]+(?:class=["']result-link["']|rel=["']nofollow["'])[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const m of lite) {
+      const url = normalizeDuckUrl(m[1]); const title = clean(m[2], 220);
+      if (url && title && /^https?:\/\//i.test(url)) out.push({ title, url, source: host(url), snippet: "Product listing discovered on the web." });
     }
   }
-
-  return results;
+  return out;
 }
 
-async function duckSearch(body: Body, domains: string[]): Promise<SearchResult[]> {
-  const brief = buildBrief(body);
+async function duckSearch(body: Body, domains: string[]): Promise<Candidate[]> {
+  const phrase = buildSearchPhrase(body);
   const groups: string[][] = [];
-  for (let i = 0; i < domains.length; i += 5) groups.push(domains.slice(i, i + 5));
-
-  const queries = groups.slice(0, 4).map((group) => `${brief} (${group.map((d) => `site:${d}`).join(" OR ")})`);
+  for (let i = 0; i < domains.length; i += 4) groups.push(domains.slice(i, i + 4));
   const region = body.country === "Poland" ? "pl-pl" : body.country === "United Kingdom" ? "uk-en" : body.country === "United States" ? "us-en" : "wt-wt";
-
-  const settled = await Promise.allSettled(
-    queries.map(async (query) => {
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=${encodeURIComponent(region)}`;
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; FindRadar/1.0; +https://find-radar.vercel.app)",
-          Accept: "text/html,application/xhtml+xml",
-        },
-        cache: "no-store",
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!response.ok) throw new Error(`Search returned ${response.status}`);
-      return parseDuckResults(await response.text(), body);
-    }),
-  );
-
-  return settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  const queries = groups.slice(0, 5).map((group) => `${phrase} ${group.map((d) => `site:${d}`).join(" OR ")}`);
+  const settled = await Promise.allSettled(queries.map(async (query) => {
+    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=${region}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; FindRadar/1.0)", Accept: "text/html" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) throw new Error(String(response.status));
+    return parseDuckResults(await response.text());
+  }));
+  return settled.flatMap((r) => r.status === "fulfilled" ? r.value : []);
 }
 
-function directFallback(body: Body, domains: string[]): SearchResult[] {
-  const q = [body.query, body.mustHave].filter(Boolean).join(" ").trim();
-  return domains
-    .filter((domain) => DIRECT_SEARCHES[domain])
-    .slice(0, 10)
-    .map((domain, index) => ({
-      title: `Search ${domain} for “${body.query?.trim()}”`,
-      url: DIRECT_SEARCHES[domain](q),
-      source: domain,
-      snippet: "Live web search was temporarily unavailable. This opens the retailer's own current search results with your product target already filled in.",
-      score: Math.max(58, 78 - index * 2),
-      kind: "store-search" as const,
-    }));
+async function tavilySearch(body: Body, domains: string[], apiKey: string): Promise<Candidate[]> {
+  const constraints = [body.mustHave && `must include ${body.mustHave}`, body.budget && `under ${body.budget} ${body.currency}`, body.condition, body.country].filter(Boolean).join(", ");
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+    body: JSON.stringify({ api_key: apiKey, query: `${body.query}. ${constraints}. Specific product pages for sale only.`, search_depth: "advanced", max_results: 20, include_answer: false, include_raw_content: false, include_images: false, include_domains: domains }),
+  });
+  if (!response.ok) throw new Error(`Tavily ${response.status}`);
+  const data = await response.json();
+  return (Array.isArray(data.results) ? data.results : []).filter((r: JsonRecord) => r.url && r.title).map((r: JsonRecord) => ({
+    title: clean(String(r.title), 220), url: String(r.url), source: host(String(r.url)), snippet: clean(String(r.content || "Product listing discovered on the web.")), searchScore: typeof r.score === "number" ? r.score : undefined,
+  }));
 }
 
-function dedupeAndSort(results: SearchResult[], domains: string[]) {
+function findProducts(value: unknown, found: JsonRecord[] = []): JsonRecord[] {
+  if (!value) return found;
+  if (Array.isArray(value)) { for (const item of value) findProducts(item, found); return found; }
+  if (typeof value !== "object") return found;
+  const obj = value as JsonRecord;
+  const type = obj["@type"];
+  if (type === "Product" || (Array.isArray(type) && type.includes("Product"))) found.push(obj);
+  for (const child of Object.values(obj)) if (child && typeof child === "object") findProducts(child, found);
+  return found;
+}
+
+function asText(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number") return String(value);
+  return undefined;
+}
+
+function offerFrom(product: JsonRecord) {
+  const raw = product.offers;
+  if (Array.isArray(raw)) return raw.find((x) => x && typeof x === "object") as JsonRecord | undefined;
+  return raw && typeof raw === "object" ? raw as JsonRecord : undefined;
+}
+
+function imageFrom(value: unknown): string | undefined {
+  if (typeof value === "string" && /^https?:\/\//.test(value)) return value;
+  if (Array.isArray(value)) return value.map(imageFrom).find(Boolean);
+  if (value && typeof value === "object") return imageFrom((value as JsonRecord).url || (value as JsonRecord).contentUrl);
+  return undefined;
+}
+
+function normalizeAvailability(value?: string) {
+  if (!value) return undefined;
+  const tail = value.split(/[\/#]/).pop() || value;
+  return tail.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+async function enrich(candidate: Candidate, body: Body): Promise<ProductResult | null> {
+  if (isLikelyNonProduct(candidate.url, candidate.title)) return null;
+  let html = "";
+  try {
+    const response = await fetch(candidate.url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; FindRadar/1.0)", Accept: "text/html,application/xhtml+xml" },
+      redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(6500),
+    });
+    if (!response.ok) return null;
+    html = await response.text();
+  } catch { return null; }
+
+  const scripts = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  const products: JsonRecord[] = [];
+  for (const script of scripts) {
+    try { findProducts(JSON.parse(script[1]), products); } catch { /* malformed JSON-LD */ }
+  }
+
+  const product = products[0];
+  const offer = product ? offerFrom(product) : undefined;
+  const metaTitle = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+    || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  const metaDescription = html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']+)["']/i)?.[1];
+  const metaImage = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1];
+  const itempropPrice = html.match(/(?:itemprop=["']price["'][^>]+content=["']([^"']+)|content=["']([^"']+)["'][^>]+itemprop=["']price["'])/i);
+  const itempropCurrency = html.match(/(?:itemprop=["']priceCurrency["'][^>]+content=["']([^"']+)|content=["']([^"']+)["'][^>]+itemprop=["']priceCurrency["'])/i);
+
+  const title = clean(asText(product?.name) || metaTitle || candidate.title, 220);
+  const description = clean(asText(product?.description) || metaDescription || candidate.snippet, 320);
+  const rawPrice = asText(offer?.price) || asText(offer?.lowPrice) || itempropPrice?.[1] || itempropPrice?.[2];
+  const numericPrice = parseNumber(rawPrice);
+  const currency = asText(offer?.priceCurrency) || itempropCurrency?.[1] || itempropCurrency?.[2] || body.currency || undefined;
+  const availability = normalizeAvailability(asText(offer?.availability));
+  const itemCondition = normalizeAvailability(asText(offer?.itemCondition));
+  const brandObj = product?.brand;
+  const brand = asText(brandObj) || (brandObj && typeof brandObj === "object" ? asText((brandObj as JsonRecord).name) : undefined);
+  const image = imageFrom(product?.image) || (metaImage && /^https?:\/\//.test(metaImage) ? metaImage : undefined);
+
+  const hay = `${title} ${description} ${brand || ""}`.toLowerCase();
+  const queryTokens = tokens(body.query);
+  const must = phrases(body.mustHave);
+  const exclude = phrases(body.exclude);
+  const excludedHit = exclude.find((x) => hay.includes(x));
+  if (excludedHit) return null;
+
+  const tokenHits = queryTokens.filter((x) => hay.includes(x));
+  const mustHits = must.filter((x) => x.split(/\s+/).every((part) => hay.includes(part)));
+  const reasons: string[] = [];
+  let score = 35;
+
+  if (queryTokens.length) {
+    const ratio = tokenHits.length / queryTokens.length;
+    score += Math.round(ratio * 30);
+    if (ratio >= 0.75) reasons.push("Strong title/spec match");
+  }
+  if (must.length) {
+    const ratio = mustHits.length / must.length;
+    score += Math.round(ratio * 18);
+    if (ratio === 1) reasons.push("All must-haves detected");
+  }
+
+  const maxBudget = budget(body);
+  if (maxBudget && numericPrice !== null) {
+    if (numericPrice <= maxBudget) { score += 12; reasons.push("Within budget"); }
+    else { score -= 30; reasons.push("Over budget"); }
+  }
+
+  const availabilityLower = (availability || "").toLowerCase();
+  if (/instock|in stock|limitedavailability/.test(availabilityLower.replace(/\s/g, "")) || /in stock/i.test(availability || "")) {
+    score += 5; reasons.push("In stock");
+  }
+
+  const conditionWanted = body.condition || "Any";
+  const conditionHay = `${itemCondition || ""} ${hay}`.toLowerCase();
+  if (conditionWanted === "New only") {
+    if (/newcondition|\bnew\b|nowy|nowa|nowe/.test(conditionHay)) { score += 5; reasons.push("New condition"); }
+    else if (/usedcondition|\bused\b|używan/.test(conditionHay)) return null;
+  }
+  if (conditionWanted === "Used only") {
+    if (/usedcondition|\bused\b|używan/.test(conditionHay)) { score += 5; reasons.push("Used condition"); }
+    else if (/newcondition|\bnew\b|nowy|nowa|nowe/.test(conditionHay)) return null;
+  }
+
+  const verified = Boolean(product || (numericPrice !== null && metaTitle));
+  if (!verified) return null;
+  score = Math.max(1, Math.min(99, score));
+
+  return {
+    title, url: candidate.url, source: candidate.source, snippet: description || "Verified product page.", score,
+    price: numericPrice !== null ? `${new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 2 }).format(numericPrice)} ${currency || ""}`.trim() : undefined,
+    numericPrice: numericPrice ?? undefined, currency, availability, condition: itemCondition, image, brand, verified, reasons: reasons.slice(0, 4),
+  };
+}
+
+function dedupeCandidates(candidates: Candidate[], domains: string[]) {
   const allowed = new Set(domains);
   const seen = new Set<string>();
-  return results
-    .filter((r) => {
-      const h = host(r.url);
-      if (!allowed.has(h) && ![...allowed].some((d) => h.endsWith(`.${d}`))) return false;
-      const key = r.url.replace(/[?#].*$/, "").replace(/\/$/, "");
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 15);
+  return candidates.filter((c) => {
+    const h = host(c.url);
+    if (!allowed.has(h) && ![...allowed].some((d) => h.endsWith(`.${d}`))) return false;
+    const key = c.url.replace(/[?#].*$/, "").replace(/\/$/, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function POST(request: Request) {
   let body: Body;
-  try {
-    body = (await request.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: "Invalid search request." }, { status: 400 });
-  }
-
+  try { body = await request.json() as Body; } catch { return NextResponse.json({ error: "Invalid search request." }, { status: 400 }); }
   if (!body.query?.trim()) return NextResponse.json({ error: "Describe a product first." }, { status: 400 });
 
   const domains = chosenDomains(body);
-  let results: SearchResult[] = [];
-  const providerNotes: string[] = [];
-
-  // If a Tavily key is present, use it as the high-quality first pass. It is optional.
+  const candidates: Candidate[] = [];
+  const providers: string[] = [];
   const apiKey = process.env.TAVILY_API_KEY;
+
   if (apiKey) {
-    try {
-      results.push(...(await tavilySearch(body, domains, apiKey)));
-      providerNotes.push("Tavily");
-    } catch {
-      // Keep going: Product Finder must still work without the paid provider.
-    }
+    try { candidates.push(...await tavilySearch(body, domains, apiKey)); providers.push("Tavily"); } catch { /* fall through */ }
   }
+  try { candidates.push(...await duckSearch(body, domains)); providers.push("web"); } catch { /* store links still available */ }
 
-  // Keyless live-web fallback. This makes Product Finder usable on a fresh Find Radar deployment.
-  if (results.length < 8) {
-    try {
-      results.push(...(await duckSearch(body, domains)));
-      providerNotes.push("web");
-    } catch {
-      // Final fallback below still gives the user useful live retailer searches.
-    }
-  }
-
-  results = dedupeAndSort(results, domains);
-  if (!results.length) results = directFallback(body, domains);
+  const unique = dedupeCandidates(candidates, domains).filter((c) => !isLikelyNonProduct(c.url, c.title)).slice(0, 18);
+  const enrichedSettled = await Promise.allSettled(unique.map((c) => enrich(c, body)));
+  const matches = enrichedSettled
+    .flatMap((r) => r.status === "fulfilled" && r.value ? [r.value] : [])
+    .sort((a, b) => {
+      const max = budget(body);
+      if (max) {
+        const aOver = a.numericPrice !== undefined && a.numericPrice > max;
+        const bOver = b.numericPrice !== undefined && b.numericPrice > max;
+        if (aOver !== bOver) return aOver ? 1 : -1;
+      }
+      return b.score - a.score;
+    })
+    .slice(0, 12);
 
   return NextResponse.json({
-    results,
-    provider: providerNotes.length ? providerNotes.join("+") : "retailer-direct",
-    fallback: results.some((r) => r.kind === "store-search"),
+    results: matches,
+    storeSearches: buildStoreSearches(body, domains),
+    provider: providers.length ? providers.join("+") : "store-direct",
+    verifiedCount: matches.length,
   });
 }
