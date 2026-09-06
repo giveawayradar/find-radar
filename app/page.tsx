@@ -122,6 +122,8 @@ export default function Home() {
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [accountUserId, setAccountUserId] = useState<string | null>(null);
   const [postingError, setPostingError] = useState("");
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID());
   const [reportsLoading, setReportsLoading] = useState(true);
   const [radarPlus, setRadarPlus] = useState(false);
   const [plusReady, setPlusReady] = useState(false);
@@ -142,6 +144,7 @@ export default function Home() {
   const placingPinRef = useRef(false);
   const pinBeforePlacementRef = useRef<{ lat: number; lng: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const publishingRef = useRef(false);
 
   useEffect(() => {
     placingPinRef.current = placingPin;
@@ -515,6 +518,7 @@ export default function Home() {
       return;
     }
     setPostingError("");
+    setSubmissionId(crypto.randomUUID());
     setReportType(type);
     const center = mapRef.current?.getCenter();
     if (privateLocation) setPin({ lat: privateLocation.lat, lng: privateLocation.lng });
@@ -607,6 +611,12 @@ export default function Home() {
 
   async function submitReport(event: FormEvent) {
     event.preventDefault();
+
+    // A ref blocks double-clicks immediately, before React has time to re-render
+    // the disabled button. The submission id gives us a second layer of
+    // idempotency in Supabase if the same request is ever retried.
+    if (publishingRef.current) return;
+
     if (!accountUserId) {
       setPostingError("You must be logged in to publish a report.");
       setModalOpen(false);
@@ -614,52 +624,63 @@ export default function Home() {
     }
     if (!title.trim()) return;
 
-    const { data, error } = await supabase
-      .from("find_radar_reports")
-      .insert({
-        user_id: accountUserId,
-        type: reportType,
-        title: title.trim(),
-        category,
-        description: description.trim(),
-        date,
-        time: time || null,
-        lat: pin.lat,
-        lng: pin.lng,
-        image_data_url: photoPreview ?? null,
-      })
-      .select("id,user_id,type,title,category,description,date,time,lat,lng,created_at,image_data_url")
-      .single();
+    publishingRef.current = true;
+    setIsPublishing(true);
+    setPostingError("");
 
-    if (error || !data) {
-      setPostingError(error?.message || "Could not publish this report.");
-      return;
+    try {
+      const { data, error } = await supabase
+        .from("find_radar_reports")
+        .upsert({
+          client_submission_id: submissionId,
+          user_id: accountUserId,
+          type: reportType,
+          title: title.trim(),
+          category,
+          description: description.trim(),
+          date,
+          time: time || null,
+          lat: pin.lat,
+          lng: pin.lng,
+          image_data_url: photoPreview ?? null,
+        }, { onConflict: "client_submission_id", ignoreDuplicates: false })
+        .select("id,user_id,type,title,category,description,date,time,lat,lng,created_at,image_data_url")
+        .single();
+
+      if (error || !data) {
+        setPostingError(error?.message || "Could not publish this report.");
+        return;
+      }
+
+      const newReport: Report = {
+        id: data.id,
+        userId: data.user_id,
+        type: data.type as ReportType,
+        title: data.title,
+        category: data.category,
+        description: data.description ?? "",
+        date: data.date,
+        time: data.time ?? undefined,
+        lat: Number(data.lat),
+        lng: Number(data.lng),
+        createdAt: new Date(data.created_at).getTime(),
+        imageDataUrl: data.image_data_url ?? undefined,
+      };
+
+      setReports((current) => [newReport, ...current.filter((item) => item.id !== newReport.id)]);
+      setSelectedReport(newReport);
+      setModalOpen(false);
+      setTitle("");
+      setDescription("");
+      setPhotoPreview(null);
+      setSubmissionId(crypto.randomUUID());
+      draftMarkerRef.current?.remove();
+      draftMarkerRef.current = null;
+      mapRef.current?.flyTo({ center: [newReport.lng, newReport.lat], zoom: 15, duration: 900 });
+    } finally {
+      publishingRef.current = false;
+      setIsPublishing(false);
     }
-
-    const newReport: Report = {
-      id: data.id,
-      userId: data.user_id,
-      type: data.type as ReportType,
-      title: data.title,
-      category: data.category,
-      description: data.description ?? "",
-      date: data.date,
-      time: data.time ?? undefined,
-      lat: Number(data.lat),
-      lng: Number(data.lng),
-      createdAt: new Date(data.created_at).getTime(),
-      imageDataUrl: data.image_data_url ?? undefined,
-    };
-
-    setReports((current) => [newReport, ...current]);
-    setSelectedReport(newReport);
-    setModalOpen(false);
-    setTitle("");
-    setDescription("");
-    setPhotoPreview(null);
-    draftMarkerRef.current?.remove();
-    draftMarkerRef.current = null;
-    mapRef.current?.flyTo({ center: [newReport.lng, newReport.lat], zoom: 15, duration: 900 });
   }
 
   async function loadConversationMessages(conversation: Conversation) {
@@ -1020,7 +1041,7 @@ export default function Home() {
 
             <div className="dateTimeGrid"><label><span>DATE</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><label><span>TIME</span><input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></label></div>
             <div className="privacyNote"><span>◈</span><p><b>Your private live location is never published.</b> Only the location you deliberately choose for this report becomes part of the lost/found signal.</p></div>
-            <button className="activateButton" type="submit">Publish {reportType} report <span>↗</span></button>
+            <button className="activateButton" type="submit" disabled={isPublishing} aria-busy={isPublishing}>{isPublishing ? <>Publishing… <span className="publishSpinner">◌</span></> : <>Publish {reportType} report <span>↗</span></>}</button>
           </form>
         </div>
       )}
