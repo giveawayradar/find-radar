@@ -175,6 +175,7 @@ export default function Home() {
   const draftMarkerRef = useRef<MapLibreMarker | null>(null);
   const privateMarkerRef = useRef<MapLibreMarker | null>(null);
   const placingPinRef = useRef(false);
+  const pinBeforePlacementRef = useRef<{ lat: number; lng: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -301,19 +302,6 @@ export default function Home() {
       map.on("error", (event) => {
         console.error("Find Radar map error", event.error);
         setMapError("Map tiles could not load. Check your connection, then refresh.");
-      });
-      map.on("click", (event) => {
-        if (!placingPinRef.current || !map) return;
-        const nextPin = { lat: event.lngLat.lat, lng: event.lngLat.lng };
-        setPin(nextPin);
-        setPlacingPin(false);
-        placingPinRef.current = false;
-        draftMarkerRef.current?.remove();
-        const element = document.createElement("div");
-        element.className = "draftLocationMarker";
-        element.innerHTML = "<span></span>";
-        draftMarkerRef.current = new Marker({ element, anchor: "center" }).setLngLat([nextPin.lng, nextPin.lat]).addTo(map);
-        setModalOpen(true);
       });
 
       mapRef.current = map;
@@ -472,9 +460,67 @@ export default function Home() {
   }
 
   function chooseMapLocation() {
+    const map = mapRef.current;
+    if (!map) return;
+
+    pinBeforePlacementRef.current = { ...pin };
     setModalOpen(false);
     setPlacingPin(true);
     placingPinRef.current = true;
+
+    draftMarkerRef.current?.remove();
+
+    const element = document.createElement("div");
+    element.className = "draftLocationMarker draggable";
+    element.innerHTML = "<span></span><i></i>";
+
+    const marker = new Marker({
+      element,
+      anchor: "center",
+      draggable: true,
+    })
+      .setLngLat([pin.lng, pin.lat])
+      .addTo(map);
+
+    marker.on("dragstart", () => element.classList.add("dragging"));
+    marker.on("drag", () => {
+      const position = marker.getLngLat();
+      setPin({ lat: position.lat, lng: position.lng });
+    });
+    marker.on("dragend", () => {
+      element.classList.remove("dragging");
+      const position = marker.getLngLat();
+      setPin({ lat: position.lat, lng: position.lng });
+    });
+
+    draftMarkerRef.current = marker;
+    map.easeTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 15), duration: 650 });
+  }
+
+  function lockMapLocation() {
+    const marker = draftMarkerRef.current;
+    if (marker) {
+      const position = marker.getLngLat();
+      setPin({ lat: position.lat, lng: position.lng });
+      marker.remove();
+      draftMarkerRef.current = null;
+    }
+    pinBeforePlacementRef.current = null;
+    setPlacingPin(false);
+    placingPinRef.current = false;
+    setModalOpen(true);
+  }
+
+  function cancelMapLocation() {
+    if (pinBeforePlacementRef.current) {
+      setPin(pinBeforePlacementRef.current);
+    }
+    pinBeforePlacementRef.current = null;
+    draftMarkerRef.current?.remove();
+    draftMarkerRef.current = null;
+    setPlacingPin(false);
+    placingPinRef.current = false;
+    setModalOpen(true);
   }
 
   function processPhoto(file?: File) {
@@ -618,7 +664,7 @@ export default function Home() {
           <div className="mapLegend"><b>Signal type</b><span><i className="lost"/>Lost</span><span><i className="found"/>Found</span></div>
           <div className="mapScale">2 km</div>
 
-          {placingPin && <div className="pinMode"><div className="crosshair">+</div><div><b>Choose the exact location</b><span>Zoom to the street, then click the map.</span></div><button onClick={() => { setPlacingPin(false); placingPinRef.current = false; setModalOpen(true); }}>Cancel</button></div>}
+          {placingPin && <div className="pinMode"><div className="crosshair">⌖</div><div><b>Drag the pin to the exact location</b><span>Move the green point, then lock it in when it&apos;s right.</span></div><div className="pinModeActions"><button className="pinCancel" onClick={cancelMapLocation}>Cancel</button><button className="pinLock" onClick={lockMapLocation}>Lock location</button></div></div>}
           {locationError && <div className="toast">{locationError}<button onClick={() => setLocationError("")}>×</button></div>}
 
           {selectedReport && (
@@ -712,7 +758,7 @@ export default function Home() {
               <label><span>CONTACT <em>optional</em></span><input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Email or preferred contact" /></label>
             </div>
 
-            <button type="button" className="locationPicker" onClick={chooseMapLocation}><span className="locationGlyph">⌖</span><span><small>LOCATION *</small><b>{pin.lat.toFixed(4)}, {pin.lng.toFixed(4)}</b><em>Pick the exact spot on the map</em></span><strong>Change ↗</strong></button>
+            <button type="button" className="locationPicker" onClick={chooseMapLocation}><span className="locationGlyph">⌖</span><span><small>LOCATION *</small><b>{pin.lat.toFixed(4)}, {pin.lng.toFixed(4)}</b><em>Drag the pin, then lock the location</em></span><strong>Change ↗</strong></button>
             {privateLocation && <button type="button" className="useCurrentLocation" onClick={() => setPin({ lat: privateLocation.lat, lng: privateLocation.lng })}>⌾ Use my private current location</button>}
 
             <div className="dateTimeGrid"><label><span>DATE</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><label><span>TIME</span><input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></label></div>
