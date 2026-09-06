@@ -19,13 +19,31 @@ type Report = {
   description: string;
   date: string;
   time?: string;
-  contact: string;
   lat: number;
   lng: number;
   createdAt: number;
   imageDataUrl?: string;
   userId: string;
-  userEmail?: string;
+};
+
+
+type Conversation = {
+  id: string;
+  reportId?: string;
+  reportTitle: string;
+  ownerUserId: string;
+  participantUserId: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type ChatMessage = {
+  id: string;
+  conversationId: string;
+  senderUserId: string;
+  body: string;
+  createdAt: number;
+  readAt?: number;
 };
 
 type PrivateLocation = {
@@ -85,7 +103,6 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Wallet");
   const [description, setDescription] = useState("");
-  const [contact, setContact] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
   const [pin, setPin] = useState({ lat: 52.4064, lng: 16.9252 });
@@ -108,6 +125,13 @@ export default function Home() {
   const [reportsLoading, setReportsLoading] = useState(true);
   const [radarPlus, setRadarPlus] = useState(false);
   const [plusReady, setPlusReady] = useState(false);
+  const [messagesOpen, setMessagesOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -141,7 +165,7 @@ export default function Home() {
       setReportsLoading(true);
       const { data, error } = await supabase
         .from("find_radar_reports")
-        .select("id,user_id,user_email,type,title,category,description,date,time,contact,lat,lng,created_at,image_data_url")
+        .select("id,user_id,type,title,category,description,date,time,lat,lng,created_at,image_data_url")
         .order("created_at", { ascending: false });
       if (!alive) return;
       if (error) {
@@ -151,10 +175,10 @@ export default function Home() {
         return;
       }
       setReports((data ?? []).map((row) => ({
-        id: row.id, userId: row.user_id, userEmail: row.user_email ?? undefined,
+        id: row.id, userId: row.user_id,
         type: row.type as ReportType, title: row.title, category: row.category,
         description: row.description ?? "", date: row.date, time: row.time ?? undefined,
-        contact: row.contact ?? "", lat: Number(row.lat), lng: Number(row.lng),
+        lat: Number(row.lat), lng: Number(row.lng),
         createdAt: new Date(row.created_at).getTime(), imageDataUrl: row.image_data_url ?? undefined,
       })));
       setReportsLoading(false);
@@ -204,6 +228,71 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadConversations() {
+      if (!accountUserId) {
+        setConversations([]);
+        setActiveConversation(null);
+        setChatMessages([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("find_radar_conversations")
+        .select("id,report_id,report_title,owner_user_id,participant_user_id,created_at,updated_at")
+        .or(`owner_user_id.eq.${accountUserId},participant_user_id.eq.${accountUserId}`)
+        .order("updated_at", { ascending: false });
+
+      if (!alive) return;
+      if (error) {
+        console.warn("Find Radar conversations unavailable", error.message);
+        setConversations([]);
+        return;
+      }
+
+      setConversations((data ?? []).map((row) => ({
+        id: row.id,
+        reportId: row.report_id ?? undefined,
+        reportTitle: row.report_title,
+        ownerUserId: row.owner_user_id,
+        participantUserId: row.participant_user_id,
+        createdAt: new Date(row.created_at).getTime(),
+        updatedAt: new Date(row.updated_at).getTime(),
+      })));
+    }
+
+    void loadConversations();
+    const timer = window.setInterval(() => void loadConversations(), 5000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [supabase, accountUserId]);
+
+  useEffect(() => {
+    if (!activeConversation || !accountUserId || !messagesOpen) return;
+    let alive = true;
+
+    async function refreshMessages() {
+      const { data, error } = await supabase
+        .from("find_radar_messages")
+        .select("id,conversation_id,sender_user_id,body,created_at,read_at")
+        .eq("conversation_id", activeConversation!.id)
+        .order("created_at", { ascending: true });
+      if (!alive || error) return;
+      setChatMessages((data ?? []).map((row) => ({
+        id: row.id,
+        conversationId: row.conversation_id,
+        senderUserId: row.sender_user_id,
+        body: row.body,
+        createdAt: new Date(row.created_at).getTime(),
+        readAt: row.read_at ? new Date(row.read_at).getTime() : undefined,
+      })));
+    }
+
+    const timer = window.setInterval(() => void refreshMessages(), 3000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [supabase, activeConversation, accountUserId, messagesOpen]);
 
   useEffect(() => {
     if (!radarSplashOpen) return;
@@ -518,7 +607,7 @@ export default function Home() {
 
   async function submitReport(event: FormEvent) {
     event.preventDefault();
-    if (!accountUserId || !accountEmail) {
+    if (!accountUserId) {
       setPostingError("You must be logged in to publish a report.");
       setModalOpen(false);
       return;
@@ -529,37 +618,33 @@ export default function Home() {
       .from("find_radar_reports")
       .insert({
         user_id: accountUserId,
-        user_email: accountEmail,
         type: reportType,
         title: title.trim(),
         category,
         description: description.trim(),
         date,
         time: time || null,
-        contact: contact.trim() || null,
         lat: pin.lat,
         lng: pin.lng,
         image_data_url: photoPreview ?? null,
       })
-      .select("id,user_id,user_email,type,title,category,description,date,time,contact,lat,lng,created_at,image_data_url")
+      .select("id,user_id,type,title,category,description,date,time,lat,lng,created_at,image_data_url")
       .single();
 
     if (error || !data) {
-      setPhotoError(error?.message || "Could not publish this report.");
+      setPostingError(error?.message || "Could not publish this report.");
       return;
     }
 
     const newReport: Report = {
       id: data.id,
       userId: data.user_id,
-      userEmail: data.user_email ?? undefined,
       type: data.type as ReportType,
       title: data.title,
       category: data.category,
       description: data.description ?? "",
       date: data.date,
       time: data.time ?? undefined,
-      contact: data.contact ?? "",
       lat: Number(data.lat),
       lng: Number(data.lng),
       createdAt: new Date(data.created_at).getTime(),
@@ -571,11 +656,138 @@ export default function Home() {
     setModalOpen(false);
     setTitle("");
     setDescription("");
-    setContact("");
     setPhotoPreview(null);
     draftMarkerRef.current?.remove();
     draftMarkerRef.current = null;
     mapRef.current?.flyTo({ center: [newReport.lng, newReport.lat], zoom: 15, duration: 900 });
+  }
+
+  async function loadConversationMessages(conversation: Conversation) {
+    setActiveConversation(conversation);
+    setMessagesOpen(true);
+    setChatLoading(true);
+    setChatError("");
+
+    const { data, error } = await supabase
+      .from("find_radar_messages")
+      .select("id,conversation_id,sender_user_id,body,created_at,read_at")
+      .eq("conversation_id", conversation.id)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setChatError(error.message);
+      setChatMessages([]);
+      setChatLoading(false);
+      return;
+    }
+
+    setChatMessages((data ?? []).map((row) => ({
+      id: row.id,
+      conversationId: row.conversation_id,
+      senderUserId: row.sender_user_id,
+      body: row.body,
+      createdAt: new Date(row.created_at).getTime(),
+      readAt: row.read_at ? new Date(row.read_at).getTime() : undefined,
+    })));
+    setChatLoading(false);
+
+    if (accountUserId) {
+      await supabase
+        .from("find_radar_messages")
+        .update({ read_at: new Date().toISOString() })
+        .eq("conversation_id", conversation.id)
+        .neq("sender_user_id", accountUserId)
+        .is("read_at", null);
+    }
+  }
+
+  async function messageReportOwner(report: Report) {
+    if (!accountUserId) {
+      setPostingError("Log in or sign up to message this Radar account.");
+      return;
+    }
+    if (report.userId === accountUserId) {
+      setMessagesOpen(true);
+      const related = conversations.filter((conversation) => conversation.reportId === report.id);
+      if (related[0]) void loadConversationMessages(related[0]);
+      return;
+    }
+
+    setChatError("");
+    const existing = conversations.find((conversation) =>
+      conversation.reportId === report.id && conversation.participantUserId === accountUserId
+    );
+    if (existing) {
+      await loadConversationMessages(existing);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("find_radar_conversations")
+      .insert({
+        report_id: report.id,
+        report_title: report.title,
+        owner_user_id: report.userId,
+        participant_user_id: accountUserId,
+      })
+      .select("id,report_id,report_title,owner_user_id,participant_user_id,created_at,updated_at")
+      .single();
+
+    if (error || !data) {
+      setChatError(error?.message || "Could not start this conversation.");
+      setMessagesOpen(true);
+      return;
+    }
+
+    const conversation: Conversation = {
+      id: data.id,
+      reportId: data.report_id ?? undefined,
+      reportTitle: data.report_title,
+      ownerUserId: data.owner_user_id,
+      participantUserId: data.participant_user_id,
+      createdAt: new Date(data.created_at).getTime(),
+      updatedAt: new Date(data.updated_at).getTime(),
+    };
+    setConversations((current) => [conversation, ...current]);
+    setSelectedReport(null);
+    await loadConversationMessages(conversation);
+  }
+
+  async function sendChatMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!activeConversation || !accountUserId || !chatDraft.trim()) return;
+
+    const body = chatDraft.trim().slice(0, 1200);
+    setChatDraft("");
+    const { data, error } = await supabase
+      .from("find_radar_messages")
+      .insert({
+        conversation_id: activeConversation.id,
+        sender_user_id: accountUserId,
+        body,
+      })
+      .select("id,conversation_id,sender_user_id,body,created_at,read_at")
+      .single();
+
+    if (error || !data) {
+      setChatDraft(body);
+      setChatError(error?.message || "Could not send this message.");
+      return;
+    }
+
+    setChatMessages((current) => [...current, {
+      id: data.id,
+      conversationId: data.conversation_id,
+      senderUserId: data.sender_user_id,
+      body: data.body,
+      createdAt: new Date(data.created_at).getTime(),
+      readAt: data.read_at ? new Date(data.read_at).getTime() : undefined,
+    }]);
+
+    const now = Date.now();
+    setConversations((current) => current
+      .map((conversation) => conversation.id === activeConversation.id ? { ...conversation, updatedAt: now } : conversation)
+      .sort((a, b) => b.updatedAt - a.updatedAt));
   }
 
   async function deleteReport(report: Report) {
@@ -617,7 +829,7 @@ export default function Home() {
       <header className="topbar">
         <button className="brandButton" onClick={() => setScreen("home")}><img className="brandLogoImage small" src="/find-radar-logo.svg" alt="Find Radar logo"/><span className="brandText"><strong>Find Radar</strong><small>Lost &amp; Found</small></span></button>
         <nav className="modeTabs"><button className="active"><span>⌾</span> Lost &amp; Found</button><button onClick={() => { setScreen("home"); setSelectedMode("products"); }}><span>◉</span> Product Finder</button><button onClick={() => { setScreen("home"); setSelectedMode("restock"); }}><span>◌</span> Restock Watch</button></nav>
-        <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a><button className="iconButton" aria-label="Search">⌕</button><AuthButton /></div>
+        <div className="topActions"><a className={`plusBadge ${radarPlus ? "active" : ""}`} href="https://opportunityradar.site/radar-plus"><span>✦</span>{plusReady && radarPlus ? "RADAR+ ACTIVE" : "Radar Plus"}</a>{accountUserId && <button className="messagesButton" onClick={() => { setMessagesOpen(true); setActiveConversation(null); }}>Messages{conversations.length > 0 ? <span>{conversations.length}</span> : null}</button>}<button className="iconButton" aria-label="Search">⌕</button><AuthButton /></div>
       </header>
 
       <section className="workspace">
@@ -694,7 +906,11 @@ export default function Home() {
               {accountUserId === selectedReport.userId && <div className="ownerTools"><span>YOUR POST</span><button onClick={() => void deleteReport(selectedReport)}>Delete post</button></div>}
               <div className="matchHeader"><span>POSSIBLE MATCHES</span><b>{matches.length}</b></div>
               <div className="matchList">{matches.slice(0, 3).map(({ report, score, distance }) => <button key={report.id} className="matchCard" onClick={() => { setSelectedReport(report); mapRef.current?.flyTo({ center: [report.lng, report.lat], zoom: 15, duration: 700 }); }}><div className="scoreRing" style={{ ["--score" as string]: `${score * 3.6}deg` }}><span>{score}%</span></div><div><b>{report.title}</b><small>{formatDistance(distance)} away · {report.category}</small></div><span>↗</span></button>)}{matches.length === 0 && <div className="noMatches">No strong matches yet. The radar keeps comparing new signals.</div>}</div>
-              <button className="contactButton">Reveal contact <span>↗</span></button>
+              {accountUserId === selectedReport.userId ? (
+                <button className="contactButton" onClick={() => { setMessagesOpen(true); setActiveConversation(null); }}>Messages about this post <span>↗</span></button>
+              ) : (
+                <button className="contactButton" onClick={() => void messageReportOwner(selectedReport)}>Message owner <span>↗</span></button>
+              )}
             </aside>
           )}
 
@@ -734,6 +950,31 @@ export default function Home() {
         </div>
       )}
 
+      {messagesOpen && (
+        <div className="messageBackdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setMessagesOpen(false); }}>
+          <section className="messageCenter">
+            <aside className="conversationRail">
+              <div className="messageRailHead"><div><span>PRIVATE RADAR CHAT</span><h2>Messages</h2></div><button onClick={() => setMessagesOpen(false)}>×</button></div>
+              {!accountUserId ? <div className="messageEmpty"><b>Log in to use messages</b><small>Chats are tied to your shared Radar account.</small></div> : conversations.length === 0 ? <div className="messageEmpty"><b>No conversations yet</b><small>Open a Lost or Found post and choose Message owner.</small></div> : <div className="conversationList">{conversations.map((conversation) => {
+                const amOwner = conversation.ownerUserId === accountUserId;
+                return <button key={conversation.id} className={activeConversation?.id === conversation.id ? "active" : ""} onClick={() => void loadConversationMessages(conversation)}><span className="conversationIcon">◌</span><span><b>{conversation.reportTitle}</b><small>{amOwner ? "Someone messaged about your post" : "Chat with post owner"}</small></span><em>›</em></button>;
+              })}</div>}
+            </aside>
+            <div className="chatPane">
+              {!activeConversation ? <div className="chatWelcome"><div className="chatRadar">◌</div><h3>Select a conversation</h3><p>Private messages stay between the two Radar accounts in this chat.</p></div> : <>
+                <header className="chatHead"><div><span>{activeConversation.reportId ? "ABOUT THIS SIGNAL" : "POST REMOVED · CHAT KEPT"}</span><h3>{activeConversation.reportTitle}</h3></div><button onClick={() => setActiveConversation(null)}>← Inbox</button></header>
+                <div className="chatStream">{chatLoading ? <div className="messageEmpty"><small>Loading messages…</small></div> : chatMessages.length === 0 ? <div className="chatFirst"><b>Start the conversation.</b><small>Keep personal contact details private until you actually want to share them.</small></div> : chatMessages.map((message) => {
+                  const mine = message.senderUserId === accountUserId;
+                  return <div key={message.id} className={`chatBubbleRow ${mine ? "mine" : "theirs"}`}><div className="chatBubble"><p>{message.body}</p><small>{new Date(message.createdAt).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div></div>;
+                })}</div>
+                {chatError && <div className="chatError">{chatError}</div>}
+                <form className="chatComposer" onSubmit={sendChatMessage}><textarea value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} placeholder="Message this Radar account…" maxLength={1200} rows={2}/><button type="submit" disabled={!chatDraft.trim()}>Send ↗</button></form>
+              </>}
+            </div>
+          </section>
+        </div>
+      )}
+
       {locationPromptOpen && (
         <div className="locationConsentBackdrop">
           <div className="locationConsent">
@@ -770,8 +1011,8 @@ export default function Home() {
             <div className="formGrid">
               <label className="span2"><span>ITEM TITLE *</span><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Black leather wallet" /></label>
               <label className="span2"><span>DESCRIPTION</span><textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brand, colour, unique marks, case, contents…" rows={4}/></label>
-              <label><span>CATEGORY</span><select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-              <label><span>CONTACT <em>optional</em></span><input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Email or preferred contact" /></label>
+              <label className="span2"><span>CATEGORY</span><select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+              <div className="span2 radarMessagingNote"><span>◌</span><div><b>Contact stays private</b><small>People can message your Radar account directly. Your email and phone number are never shown on the post.</small></div></div>
             </div>
 
             <button type="button" className="locationPicker" onClick={chooseMapLocation}><span className="locationGlyph">⌖</span><span><small>LOCATION *</small><b>{pin.lat.toFixed(4)}, {pin.lng.toFixed(4)}</b><em>Drag the pin, then lock the location</em></span><strong>Change ↗</strong></button>
