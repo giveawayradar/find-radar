@@ -2,86 +2,181 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 const SITE = "find";
+const VISITOR_KEY = "opportunity_radar_visitor_id";
+
+let analyticsClient: SupabaseClient | undefined;
+
+const storage = {
+  getItem(key: string) {
+    if (typeof window === "undefined") return null;
+
+    return (
+      window.sessionStorage.getItem(key) ??
+      window.localStorage.getItem(key)
+    );
+  },
+
+  setItem(key: string, value: string) {
+    if (typeof window === "undefined") return;
+
+    const remember =
+      window.sessionStorage.getItem("radar_remember_me") !== "false";
+
+    if (remember) {
+      window.localStorage.setItem(key, value);
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, value);
+      window.localStorage.removeItem(key);
+    }
+  },
+
+  removeItem(key: string) {
+    if (typeof window === "undefined") return;
+
+    window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem(key);
+  },
+};
+
+function getSupabase() {
+  if (analyticsClient) {
+    return analyticsClient;
+  }
+
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Missing Supabase public environment variables."
+    );
+  }
+
+  analyticsClient = createClient(
+    url,
+    key,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage,
+      },
+    }
+  );
+
+  return analyticsClient;
+}
 
 function getVisitorId() {
-  const key = "ecosystem_visitor_id";
-
-  let id = localStorage.getItem(key);
-
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
+  if (typeof window === "undefined") {
+    return null;
   }
 
-  return id;
-}
+  let visitorId =
+    window.localStorage.getItem(
+      VISITOR_KEY
+    );
 
-function detectSource() {
-  const params = new URLSearchParams(window.location.search);
+  if (!visitorId) {
+    visitorId =
+      typeof crypto !== "undefined" &&
+      "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}`;
 
-  const utmSource = params.get("utm_source");
-  if (utmSource) return utmSource;
-
-  const referrer = document.referrer;
-
-  if (!referrer) return "direct";
-
-  try {
-    const host = new URL(referrer).hostname.toLowerCase();
-
-    if (host.includes("tiktok")) return "tiktok";
-    if (host.includes("google")) return "google";
-    if (host.includes("instagram")) return "instagram";
-    if (host.includes("facebook")) return "facebook";
-    if (host.includes("reddit")) return "reddit";
-    if (host.includes("youtube")) return "youtube";
-
-    return host;
-  } catch {
-    return "unknown";
+    window.localStorage.setItem(
+      VISITOR_KEY,
+      visitorId
+    );
   }
-}
 
-function looksLikeBot(userAgent: string) {
-  return /bot|crawler|spider|headless|preview|facebookexternalhit|slurp|bingpreview/i.test(
-    userAgent
-  );
+  return visitorId;
 }
 
 export default function EcosystemAnalytics() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const track = async () => {
+    let cancelled = false;
+
+    async function trackVisit() {
       try {
-        const supabase = createBrowserSupabaseClient();
+        const supabase =
+          getSupabase();
+
+        const visitorId =
+          getVisitorId();
+
+        if (!visitorId) {
+          return;
+        }
 
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } =
+          await supabase.auth.getSession();
 
-        const visitorId = getVisitorId();
-        const userAgent = navigator.userAgent;
+        if (cancelled) {
+          return;
+        }
 
-        await supabase.from("ecosystem_pageviews").insert({
-          site: SITE,
-          visitor_id: visitorId,
-          user_id: user?.id ?? null,
-          path: pathname || "/",
-          referrer: document.referrer || null,
-          source: detectSource(),
-          user_agent: userAgent,
-          is_likely_bot: looksLikeBot(userAgent),
-        });
-      } catch {
-        // Analytics must never break the site.
+        const { error } =
+          await supabase
+            .from(
+              "ecosystem_pageviews"
+            )
+            .insert({
+              site: SITE,
+              visitor_id:
+                visitorId,
+              user_id:
+                session?.user?.id ??
+                null,
+              path:
+                pathname || "/",
+              referrer:
+                document.referrer ||
+                null,
+              source:
+                document.referrer
+                  ? "referral"
+                  : "direct",
+              user_agent:
+                navigator.userAgent ||
+                null,
+              is_likely_bot:
+                false,
+            });
+
+        if (error) {
+          console.error(
+            "Find Radar analytics error:",
+            error.message
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Find Radar analytics error:",
+          error
+        );
       }
-    };
+    }
 
-    void track();
+    void trackVisit();
+
+    return () => {
+      cancelled = true;
+    };
   }, [pathname]);
 
   return null;
