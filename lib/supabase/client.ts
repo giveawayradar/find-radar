@@ -5,6 +5,31 @@ import {
 
 let browserClient: SupabaseClient | undefined;
 
+const REMEMBER_KEY = "radar_remember_me";
+
+export function setRadarRememberMe(remember: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    REMEMBER_KEY,
+    remember ? "true" : "false"
+  );
+}
+
+export function getRadarRememberMe() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return (
+    window.sessionStorage.getItem(
+      REMEMBER_KEY
+    ) !== "false"
+  );
+}
+
 const storage = {
   getItem(key: string) {
     if (typeof window === "undefined") {
@@ -23,14 +48,26 @@ const storage = {
     }
 
     const remember =
-      window.sessionStorage.getItem("radar_remember_me") !== "false";
+      getRadarRememberMe();
 
     if (remember) {
-      window.localStorage.setItem(key, value);
-      window.sessionStorage.removeItem(key);
+      window.localStorage.setItem(
+        key,
+        value
+      );
+
+      window.sessionStorage.removeItem(
+        key
+      );
     } else {
-      window.sessionStorage.setItem(key, value);
-      window.localStorage.removeItem(key);
+      window.sessionStorage.setItem(
+        key,
+        value
+      );
+
+      window.localStorage.removeItem(
+        key
+      );
     }
   },
 
@@ -61,14 +98,18 @@ export function createBrowserSupabaseClient() {
     );
   }
 
-  browserClient = createClient(url, key, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      storage,
-    },
-  });
+  browserClient = createClient(
+    url,
+    key,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage,
+      },
+    }
+  );
 
   return browserClient;
 }
