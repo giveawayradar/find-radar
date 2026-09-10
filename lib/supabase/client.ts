@@ -1,61 +1,72 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 
-const REMEMBER_KEY = "radar-auth-remember";
-let browserClient: SupabaseClient | null = null;
+let browserClient: SupabaseClient | undefined;
 
-function selectedStorage(): Storage | undefined {
-  if (typeof window === "undefined") return undefined;
-  return window.localStorage.getItem(REMEMBER_KEY) === "false"
-    ? window.sessionStorage
-    : window.localStorage;
-}
-
-const sharedStorage = {
+const storage = {
   getItem(key: string) {
-    if (typeof window === "undefined") return null;
-    return selectedStorage()?.getItem(key) ?? null;
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return (
+      window.sessionStorage.getItem(key) ??
+      window.localStorage.getItem(key)
+    );
   },
+
   setItem(key: string, value: string) {
-    if (typeof window === "undefined") return;
-    const target = selectedStorage();
-    const other = target === window.localStorage ? window.sessionStorage : window.localStorage;
-    other.removeItem(key);
-    target?.setItem(key, value);
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const remember =
+      window.sessionStorage.getItem("radar_remember_me") !== "false";
+
+    if (remember) {
+      window.localStorage.setItem(key, value);
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, value);
+      window.localStorage.removeItem(key);
+    }
   },
+
   removeItem(key: string) {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {
+      return;
+    }
+
     window.localStorage.removeItem(key);
     window.sessionStorage.removeItem(key);
   },
 };
 
-export function setRadarRememberMe(remember: boolean) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(REMEMBER_KEY, String(remember));
-}
-
-export function getRadarRememberMe() {
-  if (typeof window === "undefined") return true;
-  return window.localStorage.getItem(REMEMBER_KEY) !== "false";
-}
-
 export function createBrowserSupabaseClient() {
-  if (browserClient) return browserClient;
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  if (browserClient) {
+    return browserClient;
   }
 
-  browserClient = createClient(url, anonKey, {
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Missing Supabase public environment variables."
+    );
+  }
+
+  browserClient = createClient(url, key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storage: sharedStorage,
-      storageKey: "opportunity-radar-auth",
+      storage,
     },
   });
 
